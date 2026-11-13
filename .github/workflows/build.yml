@@ -1,0 +1,339 @@
+name: Build Mod
+
+on:
+  push:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: 9.2.1
+
+      - name: Generate project
+        run: |
+          set -e
+          mkdir -p _build && cd _build
+          cat > build.gradle <<'EOF_FILE'
+          plugins {
+              id 'fabric-loom' version "${loom_version}"
+          }
+
+          version = project.mod_version
+          group = project.maven_group
+
+          base {
+              archivesName = project.archives_base_name
+          }
+
+          repositories {
+          }
+
+          dependencies {
+              minecraft "com.mojang:minecraft:${project.minecraft_version}"
+              mappings "net.fabricmc:yarn:${project.yarn_mappings}:v2"
+              modImplementation "net.fabricmc:fabric-loader:${project.loader_version}"
+              modImplementation "net.fabricmc.fabric-api:fabric-api:${project.fabric_api_version}"
+          }
+
+          processResources {
+              inputs.property "version", project.version
+              filesMatching("fabric.mod.json") {
+                  expand "version": inputs.properties.version
+              }
+          }
+
+          tasks.withType(JavaCompile).configureEach {
+              it.options.release = 21
+          }
+
+          java {
+              sourceCompatibility = JavaVersion.VERSION_21
+              targetCompatibility = JavaVersion.VERSION_21
+          }
+          EOF_FILE
+          cat > gradle.properties <<'EOF_FILE'
+          org.gradle.jvmargs=-Xmx2G
+          org.gradle.parallel=true
+          org.gradle.configuration-cache=false
+          minecraft_version=1.21.10
+          yarn_mappings=1.21.10+build.2
+          loader_version=0.18.1
+          loom_version=1.14-SNAPSHOT
+          fabric_api_version=0.138.3+1.21.10
+          mod_version=1.0.0
+          maven_group=com.hitmusic
+          archives_base_name=hitmusic
+          EOF_FILE
+          cat > settings.gradle <<'EOF_FILE'
+          pluginManagement {
+              repositories {
+                  maven { name = 'Fabric'; url = 'https://maven.fabricmc.net/' }
+                  mavenCentral()
+                  gradlePluginPortal()
+              }
+          }
+          rootProject.name = 'hitmusic'
+          EOF_FILE
+          mkdir -p src/main/java/com/hitmusic
+          cat > src/main/java/com/hitmusic/Audio.java <<'EOF_FILE'
+          package com.hitmusic;
+
+          import net.minecraft.client.MinecraftClient;
+          import net.minecraft.client.sound.PositionedSoundInstance;
+          import net.minecraft.client.sound.SoundInstance;
+          import net.minecraft.resource.ResourceManager;
+          import net.minecraft.sound.SoundEvent;
+          import net.minecraft.util.Identifier;
+
+          import java.util.ArrayList;
+          import java.util.List;
+
+          public final class Audio {
+              public static boolean hitEnabled = true;
+              public static int hitIndex = 0;
+              public static int songIndex = 0;
+              public static SoundInstance current = null;
+
+              private static final String[][] VANILLA_HITS = {
+                      {"Orb XP", "minecraft:entity.experience_orb.pickup"},
+                      {"Level Up", "minecraft:entity.player.levelup"},
+                      {"Panah Kena", "minecraft:entity.arrow.hit_player"},
+                      {"Crit", "minecraft:entity.player.attack.crit"},
+                      {"Anvil", "minecraft:block.anvil.land"},
+                      {"Bell", "minecraft:block.bell.use"}
+              };
+
+              private static final String[][] VANILLA_SONGS = {
+                      {"Cat", "minecraft:music_disc.cat"},
+                      {"Pigstep", "minecraft:music_disc.pigstep"},
+                      {"Otherside", "minecraft:music_disc.otherside"},
+                      {"Chirp", "minecraft:music_disc.chirp"},
+                      {"Mellohi", "minecraft:music_disc.mellohi"},
+                      {"Stal", "minecraft:music_disc.stal"},
+                      {"Relic", "minecraft:music_disc.relic"}
+              };
+
+              private Audio() {}
+
+              private static boolean exists(String path) {
+                  ResourceManager rm = MinecraftClient.getInstance().getResourceManager();
+                  return rm.getResource(Identifier.of("hitmusic", path)).isPresent();
+              }
+
+              public static List<String[]> hits() {
+                  List<String[]> list = new ArrayList<>();
+                  if (exists("sounds/hit.ogg")) {
+                      list.add(new String[]{"Custom (hit.ogg)", "hitmusic:hit"});
+                  }
+                  for (String[] s : VANILLA_HITS) list.add(s);
+                  return list;
+              }
+
+              public static List<String[]> songs() {
+                  List<String[]> list = new ArrayList<>();
+                  for (int i = 1; i <= 10; i++) {
+                      if (exists("sounds/song" + i + ".ogg")) {
+                          list.add(new String[]{"Lagu " + i + " (song" + i + ".ogg)", "hitmusic:song" + i});
+                      }
+                  }
+                  for (String[] s : VANILLA_SONGS) list.add(s);
+                  return list;
+              }
+
+              public static void playHit() {
+                  List<String[]> hits = hits();
+                  if (hits.isEmpty()) return;
+                  String[] h = hits.get(Math.floorMod(hitIndex, hits.size()));
+                  playHitById(h[1]);
+              }
+
+              public static void playHitById(String id) {
+                  SoundEvent ev = SoundEvent.of(Identifier.of(id));
+                  MinecraftClient.getInstance().getSoundManager()
+                          .play(PositionedSoundInstance.master(ev, 1.0f, 1.0f));
+              }
+
+              public static void playSong(String id) {
+                  stopSong();
+                  SoundEvent ev = SoundEvent.of(Identifier.of(id));
+                  current = PositionedSoundInstance.master(ev, 1.0f, 1.0f);
+                  MinecraftClient.getInstance().getSoundManager().play(current);
+              }
+
+              public static void stopSong() {
+                  if (current != null) {
+                      MinecraftClient.getInstance().getSoundManager().stop(current);
+                      current = null;
+                  }
+              }
+          }
+          EOF_FILE
+          mkdir -p src/main/java/com/hitmusic
+          cat > src/main/java/com/hitmusic/HitMusicClient.java <<'EOF_FILE'
+          package com.hitmusic;
+
+          import net.fabricmc.api.ClientModInitializer;
+          import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents;
+          import net.fabricmc.fabric.api.client.keybinding.v1.KeyBindingHelper;
+          import net.fabricmc.fabric.api.event.player.AttackEntityCallback;
+          import net.minecraft.client.option.KeyBinding;
+          import net.minecraft.client.util.InputUtil;
+          import net.minecraft.entity.LivingEntity;
+          import net.minecraft.util.ActionResult;
+          import net.minecraft.util.Identifier;
+          import org.lwjgl.glfw.GLFW;
+
+          public class HitMusicClient implements ClientModInitializer {
+              public static KeyBinding openKey;
+
+              @Override
+              public void onInitializeClient() {
+                  KeyBinding.Category category = KeyBinding.Category.create(Identifier.of("hitmusic", "main"));
+                  openKey = KeyBindingHelper.registerKeyBinding(
+                          new KeyBinding("key.hitmusic.open", InputUtil.Type.KEYSYM, GLFW.GLFW_KEY_M, category));
+
+                  ClientTickEvents.END_CLIENT_TICK.register(client -> {
+                      while (openKey.wasPressed()) {
+                          if (client.currentScreen == null) {
+                              client.setScreen(new MusicScreen());
+                          }
+                      }
+                  });
+
+                  AttackEntityCallback.EVENT.register((player, world, hand, entity, hitResult) -> {
+                      if (world.isClient() && Audio.hitEnabled && entity instanceof LivingEntity) {
+                          Audio.playHit();
+                      }
+                      return ActionResult.PASS;
+                  });
+              }
+          }
+          EOF_FILE
+          mkdir -p src/main/java/com/hitmusic
+          cat > src/main/java/com/hitmusic/MusicScreen.java <<'EOF_FILE'
+          package com.hitmusic;
+
+          import net.minecraft.client.gui.DrawContext;
+          import net.minecraft.client.gui.screen.Screen;
+          import net.minecraft.client.gui.widget.ButtonWidget;
+          import net.minecraft.text.Text;
+
+          import java.util.List;
+
+          public class MusicScreen extends Screen {
+              private List<String[]> hits;
+              private List<String[]> songs;
+              private ButtonWidget toggleBtn;
+              private ButtonWidget hitBtn;
+              private ButtonWidget songBtn;
+
+              public MusicScreen() {
+                  super(Text.literal("Hit & Music"));
+              }
+
+              @Override
+              protected void init() {
+                  hits = Audio.hits();
+                  songs = Audio.songs();
+                  int cx = this.width / 2;
+                  int y = this.height / 4;
+
+                  toggleBtn = addDrawableChild(ButtonWidget.builder(Text.empty(), b -> {
+                      Audio.hitEnabled = !Audio.hitEnabled;
+                      refresh();
+                  }).dimensions(cx - 100, y, 200, 20).build());
+
+                  hitBtn = addDrawableChild(ButtonWidget.builder(Text.empty(), b -> {
+                      Audio.hitIndex = Math.floorMod(Audio.hitIndex + 1, hits.size());
+                      refresh();
+                  }).dimensions(cx - 100, y + 24, 200, 20).build());
+
+                  addDrawableChild(ButtonWidget.builder(Text.literal("Tes suara hit"), b ->
+                          Audio.playHitById(hits.get(Math.floorMod(Audio.hitIndex, hits.size()))[1])
+                  ).dimensions(cx - 100, y + 48, 200, 20).build());
+
+                  songBtn = addDrawableChild(ButtonWidget.builder(Text.empty(), b -> {
+                      Audio.songIndex = Math.floorMod(Audio.songIndex + 1, songs.size());
+                      refresh();
+                  }).dimensions(cx - 100, y + 84, 200, 20).build());
+
+                  addDrawableChild(ButtonWidget.builder(Text.literal("Putar"), b ->
+                          Audio.playSong(songs.get(Math.floorMod(Audio.songIndex, songs.size()))[1])
+                  ).dimensions(cx - 100, y + 108, 98, 20).build());
+
+                  addDrawableChild(ButtonWidget.builder(Text.literal("Stop"), b ->
+                          Audio.stopSong()
+                  ).dimensions(cx + 2, y + 108, 98, 20).build());
+
+                  addDrawableChild(ButtonWidget.builder(Text.literal("Tutup"), b ->
+                          this.close()
+                  ).dimensions(cx - 100, y + 140, 200, 20).build());
+
+                  refresh();
+              }
+
+              private void refresh() {
+                  toggleBtn.setMessage(Text.literal("Suara hit: " + (Audio.hitEnabled ? "ON" : "OFF")));
+                  hitBtn.setMessage(Text.literal("Jenis hit: " + hits.get(Math.floorMod(Audio.hitIndex, hits.size()))[0]));
+                  songBtn.setMessage(Text.literal("Lagu: " + songs.get(Math.floorMod(Audio.songIndex, songs.size()))[0]));
+              }
+
+              @Override
+              public void render(DrawContext context, int mouseX, int mouseY, float delta) {
+                  super.render(context, mouseX, mouseY, delta);
+                  context.drawCenteredTextWithShadow(this.textRenderer, this.title, this.width / 2, this.height / 4 - 20, 0xFFFFFFFF);
+              }
+          }
+          EOF_FILE
+          mkdir -p src/main/resources/assets/hitmusic/lang
+          cat > src/main/resources/assets/hitmusic/lang/en_us.json <<'EOF_FILE'
+          {
+            "key.hitmusic.open": "Buka Hit & Music",
+            "key.category.hitmusic.main": "Hit & Music"
+          }
+          EOF_FILE
+          mkdir -p src/main/resources
+          cat > src/main/resources/fabric.mod.json <<'EOF_FILE'
+          {
+            "schemaVersion": 1,
+            "id": "hitmusic",
+            "version": "${version}",
+            "name": "Hit & Music",
+            "description": "Suara hit + pemutar lagu dengan GUI (tekan M).",
+            "authors": ["The Dark"],
+            "environment": "client",
+            "entrypoints": {
+              "client": ["com.hitmusic.HitMusicClient"]
+            },
+            "depends": {
+              "fabricloader": ">=0.18.0",
+              "minecraft": "~1.21.10",
+              "java": ">=21",
+              "fabric-api": "*"
+            }
+          }
+          EOF_FILE
+          SND=src/main/resources/assets/hitmusic/sounds
+          mkdir -p $SND
+          cp ../song*.ogg $SND/ 2>/dev/null || true
+          cp ../hit.ogg $SND/ 2>/dev/null || true
+          { echo '{'; echo '"hit":{"sounds":[{"name":"hitmusic:hit"}]}'; for i in 1 2 3 4 5 6 7 8 9 10; do echo ",\"song$i\":{\"sounds\":[{\"name\":\"hitmusic:song$i\",\"stream\":true}]}"; done; echo '}'; } > src/main/resources/assets/hitmusic/sounds.json
+
+      - name: Build
+        working-directory: _build
+        run: gradle build --no-daemon
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: hitmusic-mod
+          path: _build/build/libs/hitmusic-*jar
