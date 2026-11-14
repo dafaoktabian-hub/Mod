@@ -22,7 +22,8 @@ jobs:
       - name: Generate project
         run: |
           set -e
-          mkdir -p _build && cd _build
+          mkdir -p _build/src/main/java/com/hitmusic _build/src/main/resources/assets/hitmusic/lang _build/src/main/resources/assets/hitmusic/sounds
+          cd _build
           cat > build.gradle <<'EOF_FILE'
           plugins {
               id 'fabric-loom' version "${loom_version}"
@@ -84,385 +85,44 @@ jobs:
           }
           rootProject.name = 'hitmusic'
           EOF_FILE
-          mkdir -p src/main/java/com/hitmusic
-          cat > src/main/java/com/hitmusic/Audio.java <<'EOF_FILE'
-          package com.hitmusic;
-
-          import net.minecraft.client.MinecraftClient;
-          import net.minecraft.client.sound.PositionedSoundInstance;
-          import net.minecraft.client.sound.SoundInstance;
-          import net.minecraft.resource.ResourceManager;
-          import net.minecraft.sound.SoundEvent;
-          import net.minecraft.util.Identifier;
-
-          import java.util.ArrayList;
-          import java.util.List;
-
-          public final class Audio {
-              public static SoundInstance current = null;
-
-              private static final String[][] VANILLA_HITS = {
-                      {"Orb XP", "minecraft:entity.experience_orb.pickup"},
-                      {"Level Up", "minecraft:entity.player.levelup"},
-                      {"Panah Kena", "minecraft:entity.arrow.hit_player"},
-                      {"Crit", "minecraft:entity.player.attack.crit"},
-                      {"Anvil", "minecraft:block.anvil.land"},
-                      {"Bell", "minecraft:block.bell.use"}
-              };
-
-              private static final String[][] VANILLA_SONGS = {
-                      {"Cat", "minecraft:music_disc.cat"},
-                      {"Pigstep", "minecraft:music_disc.pigstep"},
-                      {"Otherside", "minecraft:music_disc.otherside"},
-                      {"Chirp", "minecraft:music_disc.chirp"},
-                      {"Mellohi", "minecraft:music_disc.mellohi"},
-                      {"Stal", "minecraft:music_disc.stal"},
-                      {"Relic", "minecraft:music_disc.relic"}
-              };
-
-              private Audio() {}
-
-              private static boolean exists(String path) {
-                  ResourceManager rm = MinecraftClient.getInstance().getResourceManager();
-                  return rm.getResource(Identifier.of("hitmusic", path)).isPresent();
-              }
-
-              public static List<String[]> hits() {
-                  List<String[]> list = new ArrayList<>();
-                  if (exists("sounds/hit.ogg")) {
-                      list.add(new String[]{"Custom (hit.ogg)", "hitmusic:hit"});
-                  }
-                  for (String[] s : VANILLA_HITS) list.add(s);
-                  return list;
-              }
-
-              public static List<String[]> songs() {
-                  List<String[]> list = new ArrayList<>();
-                  for (int i = 1; i <= 10; i++) {
-                      if (exists("sounds/song" + i + ".ogg")) {
-                          list.add(new String[]{"Lagu " + i + " (song" + i + ".ogg)", "hitmusic:song" + i});
-                      }
-                  }
-                  for (String[] s : VANILLA_SONGS) list.add(s);
-                  return list;
-              }
-
-              public static void playHit() {
-                  List<String[]> hits = hits();
-                  if (hits.isEmpty()) return;
-                  String[] h = hits.get(Math.floorMod(Config.hitIndex, hits.size()));
-                  SoundEvent ev = SoundEvent.of(Identifier.of(h[1]));
-                  MinecraftClient.getInstance().getSoundManager()
-                          .play(PositionedSoundInstance.master(ev, 1.0f, Config.hitVol / 100f));
-              }
-
-              public static void playSong() {
-                  List<String[]> songs = songs();
-                  if (songs.isEmpty()) return;
-                  String[] s = songs.get(Math.floorMod(Config.songIndex, songs.size()));
-                  stopSong();
-                  SoundEvent ev = SoundEvent.of(Identifier.of(s[1]));
-                  current = PositionedSoundInstance.master(ev, 1.0f, Config.songVol / 100f);
-                  MinecraftClient.getInstance().getSoundManager().play(current);
-              }
-
-              public static void stopSong() {
-                  if (current != null) {
-                      MinecraftClient.getInstance().getSoundManager().stop(current);
-                      current = null;
-                  }
-              }
-
-              public static boolean isPlaying() {
-                  return current != null && MinecraftClient.getInstance().getSoundManager().isPlaying(current);
-              }
+          cat > src/main/resources/fabric.mod.json <<'EOF_FILE'
+          {
+            "schemaVersion": 1,
+            "id": "hitmusic",
+            "version": "${version}",
+            "name": "Hit & Music",
+            "description": "Hit sound, pemutar lagu, scan spawner dan chest, auto mine. Buka GUI dengan tombol M atau /hitmusic.",
+            "authors": ["The Dark"],
+            "environment": "client",
+            "entrypoints": {
+              "client": ["com.hitmusic.HitMusicClient"]
+            },
+            "depends": {
+              "fabricloader": ">=0.18.0",
+              "minecraft": "~1.21.10",
+              "java": ">=21",
+              "fabric-api": "*"
+            }
           }
           EOF_FILE
-          mkdir -p src/main/java/com/hitmusic
-          cat > src/main/java/com/hitmusic/AutoMine.java <<'EOF_FILE'
-          package com.hitmusic;
-
-          import net.minecraft.block.BlockState;
-          import net.minecraft.client.MinecraftClient;
-          import net.minecraft.client.network.ClientPlayerEntity;
-          import net.minecraft.client.world.ClientWorld;
-          import net.minecraft.text.Text;
-          import net.minecraft.util.Hand;
-          import net.minecraft.util.math.BlockPos;
-          import net.minecraft.util.math.Direction;
-          import net.minecraft.util.math.Vec3d;
-
-          public final class AutoMine {
-              public static boolean running = false;
-              public static int remaining = 0;
-
-              private static BlockPos walkTarget = null;
-              private static int ticks = 0;
-
-              private static final double REACH = 4.5;
-              private static final long MAX_VOLUME = 100000L;
-
-              private AutoMine() {}
-
-              public static long volume() {
-                  if (Config.pos1 == null || Config.pos2 == null) return 0;
-                  long dx = Math.abs(Config.pos1.getX() - Config.pos2.getX()) + 1;
-                  long dy = Math.abs(Config.pos1.getY() - Config.pos2.getY()) + 1;
-                  long dz = Math.abs(Config.pos1.getZ() - Config.pos2.getZ()) + 1;
-                  return dx * dy * dz;
-              }
-
-              private static void msg(MinecraftClient mc, String s) {
-                  if (mc.player != null) mc.player.sendMessage(Text.literal(s), true);
-              }
-
-              public static void start(MinecraftClient mc) {
-                  if (Config.pos1 == null || Config.pos2 == null) {
-                      msg(mc, "Set Pos1 dan Pos2 dulu");
-                      return;
-                  }
-                  if (volume() > MAX_VOLUME) {
-                      msg(mc, "Area kegedean (maks 100.000 blok)");
-                      return;
-                  }
-                  running = true;
-                  ticks = 0;
-                  walkTarget = null;
-                  remaining = 0;
-                  msg(mc, "Auto Mine mulai. Pegang pickaxe!");
-              }
-
-              public static void stop(MinecraftClient mc, String why) {
-                  running = false;
-                  walkTarget = null;
-                  mc.options.forwardKey.setPressed(false);
-                  msg(mc, why);
-              }
-
-              private static boolean mineable(ClientWorld w, BlockPos bp) {
-                  BlockState s = w.getBlockState(bp);
-                  if (s.isAir()) return false;
-                  if (!s.getFluidState().isEmpty()) return false;
-                  return s.getHardness(w, bp) >= 0;
-              }
-
-              private static void lookAt(ClientPlayerEntity p, BlockPos t) {
-                  Vec3d eye = p.getEyePos();
-                  double dx = t.getX() + 0.5 - eye.x;
-                  double dy = t.getY() + 0.5 - eye.y;
-                  double dz = t.getZ() + 0.5 - eye.z;
-                  double h = Math.sqrt(dx * dx + dz * dz);
-                  p.setYaw((float) (Math.toDegrees(Math.atan2(dz, dx)) - 90.0));
-                  p.setPitch((float) -Math.toDegrees(Math.atan2(dy, h)));
-              }
-
-              private static void fullScan(ClientWorld w, Vec3d eye) {
-                  int x1 = Math.min(Config.pos1.getX(), Config.pos2.getX());
-                  int x2 = Math.max(Config.pos1.getX(), Config.pos2.getX());
-                  int y1 = Math.min(Config.pos1.getY(), Config.pos2.getY());
-                  int y2 = Math.max(Config.pos1.getY(), Config.pos2.getY());
-                  int z1 = Math.min(Config.pos1.getZ(), Config.pos2.getZ());
-                  int z2 = Math.max(Config.pos1.getZ(), Config.pos2.getZ());
-                  int count = 0;
-                  BlockPos best = null;
-                  double bestScore = Double.MAX_VALUE;
-                  for (int y = y2; y >= y1; y--) {
-                      for (int x = x1; x <= x2; x++) {
-                          for (int z = z1; z <= z2; z++) {
-                              BlockPos bp = new BlockPos(x, y, z);
-                              if (!mineable(w, bp)) continue;
-                              count++;
-                              double dx = x + 0.5 - eye.x;
-                              double dy = y + 0.5 - eye.y;
-                              double dz = z + 0.5 - eye.z;
-                              double score = (y2 - y) * 1000.0 + dx * dx + dy * dy + dz * dz;
-                              if (score < bestScore) {
-                                  bestScore = score;
-                                  best = bp;
-                              }
-                          }
-                      }
-                  }
-                  remaining = count;
-                  walkTarget = best;
-              }
-
-              public static void tick(MinecraftClient mc) {
-                  if (!running) return;
-                  ClientPlayerEntity p = mc.player;
-                  ClientWorld w = mc.world;
-                  if (p == null || w == null || mc.interactionManager == null || Config.pos1 == null || Config.pos2 == null) {
-                      running = false;
-                      return;
-                  }
-                  if (mc.currentScreen != null) {
-                      mc.options.forwardKey.setPressed(false);
-                      return;
-                  }
-                  if (p.getHealth() < 8.0f) {
-                      stop(mc, "Auto Mine berhenti: darah rendah");
-                      return;
-                  }
-                  ticks++;
-                  Vec3d eye = p.getEyePos();
-                  if (ticks % 20 == 1) fullScan(w, eye);
-
-                  int x1 = Math.min(Config.pos1.getX(), Config.pos2.getX());
-                  int x2 = Math.max(Config.pos1.getX(), Config.pos2.getX());
-                  int y1 = Math.min(Config.pos1.getY(), Config.pos2.getY());
-                  int y2 = Math.max(Config.pos1.getY(), Config.pos2.getY());
-                  int z1 = Math.min(Config.pos1.getZ(), Config.pos2.getZ());
-                  int z2 = Math.max(Config.pos1.getZ(), Config.pos2.getZ());
-                  int ex = (int) Math.floor(eye.x);
-                  int ey = (int) Math.floor(eye.y);
-                  int ez = (int) Math.floor(eye.z);
-                  int r = 5;
-
-                  BlockPos best = null;
-                  double bestScore = Double.MAX_VALUE;
-                  for (int y = Math.min(y2, ey + r); y >= Math.max(y1, ey - r); y--) {
-                      for (int x = Math.max(x1, ex - r); x <= Math.min(x2, ex + r); x++) {
-                          for (int z = Math.max(z1, ez - r); z <= Math.min(z2, ez + r); z++) {
-                              BlockPos bp = new BlockPos(x, y, z);
-                              if (!mineable(w, bp)) continue;
-                              double dx = x + 0.5 - eye.x;
-                              double dy = y + 0.5 - eye.y;
-                              double dz = z + 0.5 - eye.z;
-                              double d2 = dx * dx + dy * dy + dz * dz;
-                              if (d2 > REACH * REACH) continue;
-                              double score = (y2 - y) * 1000.0 + d2;
-                              if (score < bestScore) {
-                                  bestScore = score;
-                                  best = bp;
-                              }
-                          }
-                      }
-                  }
-
-                  if (best != null) {
-                      mc.options.forwardKey.setPressed(false);
-                      lookAt(p, best);
-                      Direction side = Direction.getFacing(
-                              eye.x - (best.getX() + 0.5),
-                              eye.y - (best.getY() + 0.5),
-                              eye.z - (best.getZ() + 0.5));
-                      mc.interactionManager.updateBlockBreakingProgress(best, side);
-                      p.swingHand(Hand.MAIN_HAND);
-                      return;
-                  }
-
-                  if (walkTarget == null || !mineable(w, walkTarget)) {
-                      fullScan(w, eye);
-                  }
-                  if (walkTarget == null) {
-                      stop(mc, "Selesai! Area sudah bersih");
-                      return;
-                  }
-                  if (Config.autoWalk) {
-                      lookAt(p, walkTarget);
-                      p.setPitch(0.0f);
-                      mc.options.forwardKey.setPressed(true);
-                  } else {
-                      mc.options.forwardKey.setPressed(false);
-                      msg(mc, "Dekati area (di luar jangkauan)");
-                  }
-              }
+          cat > src/main/resources/assets/hitmusic/lang/en_us.json <<'EOF_FILE'
+          {
+            "key.hitmusic.open": "Buka Hit & Music",
+            "key.category.hitmusic.main": "Hit & Music"
           }
           EOF_FILE
-          mkdir -p src/main/java/com/hitmusic
-          cat > src/main/java/com/hitmusic/Config.java <<'EOF_FILE'
-          package com.hitmusic;
+          cp ../*.java src/main/java/com/hitmusic/
+          SND=src/main/resources/assets/hitmusic/sounds
+          cp ../song*.ogg $SND/ 2>/dev/null || true
+          cp ../hit.ogg $SND/ 2>/dev/null || true
+          { echo '{'; echo '"hit":{"sounds":[{"name":"hitmusic:hit"}]}'; for i in 1 2 3 4 5 6 7 8 9 10; do echo ",\"song$i\":{\"sounds\":[{\"name\":\"hitmusic:song$i\",\"stream\":true}]}"; done; echo '}'; } > src/main/resources/assets/hitmusic/sounds.json
+          ls src/main/java/com/hitmusic
 
-          import net.fabricmc.loader.api.FabricLoader;
-          import net.minecraft.util.math.BlockPos;
+      - name: Build
+        working-directory: _build
+        run: gradle build --no-daemon
 
-          import java.io.InputStream;
-          import java.io.OutputStream;
-          import java.nio.file.Files;
-          import java.nio.file.Path;
-          import java.util.Properties;
-
-          public final class Config {
-              public static boolean hitEnabled = true;
-              public static int hitIndex = 0;
-              public static int hitVol = 100;
-              public static int songIndex = 0;
-              public static int songVol = 100;
-              public static boolean showSpawner = true;
-              public static boolean showChest = true;
-              public static boolean autoWalk = true;
-              public static BlockPos pos1 = null;
-              public static BlockPos pos2 = null;
-
-              private Config() {}
-
-              private static Path file() {
-                  return FabricLoader.getInstance().getConfigDir().resolve("hitmusic.properties");
-              }
-
-              public static int nextVol(int v) {
-                  if (v >= 100) return 75;
-                  if (v >= 75) return 50;
-                  if (v >= 50) return 25;
-                  return 100;
-              }
-
-              private static String fmt(BlockPos p) {
-                  return p == null ? "" : p.getX() + "," + p.getY() + "," + p.getZ();
-              }
-
-              private static BlockPos parse(String s) {
-                  try {
-                      if (s == null || s.isEmpty()) return null;
-                      String[] a = s.split(",");
-                      return new BlockPos(Integer.parseInt(a[0].trim()), Integer.parseInt(a[1].trim()), Integer.parseInt(a[2].trim()));
-                  } catch (Exception e) {
-                      return null;
-                  }
-              }
-
-              private static int num(Properties p, String key, int def) {
-                  try {
-                      return Integer.parseInt(p.getProperty(key, String.valueOf(def)).trim());
-                  } catch (Exception e) {
-                      return def;
-                  }
-              }
-
-              public static void load() {
-                  try {
-                      Path f = file();
-                      if (!Files.exists(f)) return;
-                      Properties p = new Properties();
-                      try (InputStream in = Files.newInputStream(f)) {
-                          p.load(in);
-                      }
-                      hitEnabled = Boolean.parseBoolean(p.getProperty("hitEnabled", "true"));
-                      hitIndex = num(p, "hitIndex", 0);
-                      hitVol = num(p, "hitVol", 100);
-                      songIndex = num(p, "songIndex", 0);
-                      songVol = num(p, "songVol", 100);
-                      showSpawner = Boolean.parseBoolean(p.getProperty("showSpawner", "true"));
-                      showChest = Boolean.parseBoolean(p.getProperty("showChest", "true"));
-                      autoWalk = Boolean.parseBoolean(p.getProperty("autoWalk", "true"));
-                      pos1 = parse(p.getProperty("pos1"));
-                      pos2 = parse(p.getProperty("pos2"));
-                  } catch (Exception ignored) {
-                  }
-              }
-
-              public static void save() {
-                  try {
-                      Properties p = new Properties();
-                      p.setProperty("hitEnabled", String.valueOf(hitEnabled));
-                      p.setProperty("hitIndex", String.valueOf(hitIndex));
-                      p.setProperty("hitVol", String.valueOf(hitVol));
-                      p.setProperty("songIndex", String.valueOf(songIndex));
-                      p.setProperty("songVol", String.valueOf(songVol));
-                      p.setProperty("showSpawner", String.valueOf(showSpawner));
-                      p.setProperty("showChest", String.valueOf(showChest));
-                      p.setProperty("autoWalk", String.valueOf(autoWalk));
-                      p.setProperty("pos1", fmt(pos1));
-                      p.setProperty("pos2", fmt(pos2));
-                      try (OutputStream out = Files.newOutputStream(file())) {
-                          p.store(out, "H
+      - uses: actions/upload-artifact@v4
+        with:
+          name: hitmusic-mod
+          path: _build/build/libs/hitmusic-*.jar
