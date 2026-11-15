@@ -71,7 +71,7 @@ jobs:
           loader_version=0.18.1
           loom_version=1.14-SNAPSHOT
           fabric_api_version=0.138.3+1.21.10
-          mod_version=1.1.0
+          mod_version=2.0.0
           maven_group=com.hitmusic
           archives_base_name=hitmusic
           EOF_FILE
@@ -90,12 +90,12 @@ jobs:
             "schemaVersion": 1,
             "id": "hitmusic",
             "version": "${version}",
-            "name": "Hit & Music",
-            "description": "Hit sound, pemutar lagu, scan spawner dan chest, auto mine. Buka GUI dengan tombol M atau /hitmusic.",
+            "name": "Polino Client",
+            "description": "Polino Client: hit sound, musik, radar spawner/chest, auto mine, HUD. Buka GUI dengan M atau /hitmusic.",
             "authors": ["The Dark"],
             "environment": "client",
             "entrypoints": {
-              "client": ["com.hitmusic.HitMusicClient"]
+              "client": ["com.hitmusic.PolinoClient"]
             },
             "depends": {
               "fabricloader": ">=0.18.0",
@@ -111,7 +111,7 @@ jobs:
             "key.category.hitmusic.main": "Hit & Music"
           }
           EOF_FILE
-          cp ../*.java src/main/java/com/hitmusic/
+          cp ../Polino*.java src/main/java/com/hitmusic/
           SND=src/main/resources/assets/hitmusic/sounds
           cp ../song*.ogg $SND/ 2>/dev/null || true
           cp ../hit.ogg $SND/ 2>/dev/null || true
@@ -120,7 +120,16 @@ jobs:
 
       - name: Build
         working-directory: _build
-        run: gradle build --no-daemon
+        run: |
+          echo "### Java files: $(ls ../Polino*.java | xargs -n1 basename | tr '\n' ' ')" >> $GITHUB_STEP_SUMMARY
+          if ! gradle build --no-daemon > build.log 2>&1; then
+            echo '### ERROR BUILD' >> $GITHUB_STEP_SUMMARY
+            echo '```' >> $GITHUB_STEP_SUMMARY
+            grep -E "error:|What went wrong|FAILED|Could not" -A3 build.log | head -60 >> $GITHUB_STEP_SUMMARY
+            echo '```' >> $GITHUB_STEP_SUMMARY
+            tail -80 build.log
+            exit 1
+          fi
 
       - uses: actions/upload-artifact@v4
         with:
