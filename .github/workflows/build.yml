@@ -71,7 +71,7 @@ jobs:
           loader_version=0.18.1
           loom_version=1.14-SNAPSHOT
           fabric_api_version=0.138.3+1.21.10
-          mod_version=2.0.0
+          mod_version=3.0.0
           maven_group=com.hitmusic
           archives_base_name=hitmusic
           EOF_FILE
@@ -95,7 +95,7 @@ jobs:
             "authors": ["The Dark"],
             "environment": "client",
             "entrypoints": {
-              "client": ["com.hitmusic.PolinoClient"]
+              "client": ["com.hitmusic.HitMusicClient"]
             },
             "depends": {
               "fabricloader": ">=0.18.0",
@@ -111,7 +111,7 @@ jobs:
             "key.category.hitmusic.main": "Hit & Music"
           }
           EOF_FILE
-          cp ../Polino*.java src/main/java/com/hitmusic/
+          cp ../*.java src/main/java/com/hitmusic/
           SND=src/main/resources/assets/hitmusic/sounds
           cp ../song*.ogg $SND/ 2>/dev/null || true
           cp ../hit.ogg $SND/ 2>/dev/null || true
@@ -121,7 +121,7 @@ jobs:
       - name: Build
         working-directory: _build
         run: |
-          echo "### Java files: $(ls ../Polino*.java | xargs -n1 basename | tr '\n' ' ')" >> $GITHUB_STEP_SUMMARY
+          echo "### Java files: $(ls ../*.java | xargs -n1 basename | tr '\n' ' ')" >> $GITHUB_STEP_SUMMARY
           if ! gradle build --no-daemon > build.log 2>&1; then
             echo '### ERROR BUILD' >> $GITHUB_STEP_SUMMARY
             echo '```' >> $GITHUB_STEP_SUMMARY
