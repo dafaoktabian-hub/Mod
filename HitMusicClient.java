@@ -7,6 +7,7 @@ import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents;
 import net.fabricmc.fabric.api.client.keybinding.v1.KeyBindingHelper;
 import net.fabricmc.fabric.api.client.rendering.v1.HudRenderCallback;
 import net.fabricmc.fabric.api.event.player.AttackEntityCallback;
+import net.minecraft.client.gui.screen.DeathScreen;
 import net.minecraft.client.option.KeyBinding;
 import net.minecraft.client.util.InputUtil;
 import net.minecraft.entity.LivingEntity;
@@ -61,6 +62,10 @@ public class HitMusicClient implements ClientModInitializer {
             Finder.tick(client);
             AutoMine.tick(client);
             Modules.tick(client);
+            if (Config.getBool("survival.respawn", false) && client.player != null
+                    && client.currentScreen instanceof DeathScreen) {
+                client.player.requestRespawn();
+            }
             if (Config.autoSprint && client.player != null && client.currentScreen == null
                     && client.options.forwardKey.isPressed() && !client.player.isSneaking()
                     && client.player.getHungerManager().getFoodLevel() > 6) {

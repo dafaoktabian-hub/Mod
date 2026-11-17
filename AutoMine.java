@@ -25,10 +25,9 @@ public final class AutoMine {
     public static final String[] SMOOTHS = {"Halus", "Pelan", "Sangat Pelan"};
     public static final int[] RADII = {16, 32, 64, 128};
 
-    public static final String[] ORES = {"Semua Blok", "Iron", "Gold", "Diamond", "Coal", "Copper",
+    public static final String[] ORES = {"Iron", "Gold", "Diamond", "Coal", "Copper",
             "Redstone", "Lapis", "Emerald", "Ancient Debris", "Quartz"};
     private static final Block[][] ORE_BLOCKS = {
-            {},
             {Blocks.IRON_ORE, Blocks.DEEPSLATE_IRON_ORE},
             {Blocks.GOLD_ORE, Blocks.DEEPSLATE_GOLD_ORE, Blocks.NETHER_GOLD_ORE},
             {Blocks.DIAMOND_ORE, Blocks.DEEPSLATE_DIAMOND_ORE},
@@ -40,6 +39,8 @@ public final class AutoMine {
             {Blocks.ANCIENT_DEBRIS},
             {Blocks.NETHER_QUARTZ_ORE}
     };
+
+    public static boolean oreSearch = false;
 
     private static final int[] DELAY = {0, 2, 6};
     private static final float[] FACTOR = {1.0f, 0.4f, 0.2f};
@@ -83,6 +84,10 @@ public final class AutoMine {
     }
 
     public static void start(MinecraftClient mc) {
+        start(mc, false);
+    }
+
+    public static void start(MinecraftClient mc, boolean ore) {
         if (Config.pos1 == null || Config.pos2 == null) {
             msg(mc, "Set Posisi 1 dan 2 dulu (tab Area)");
             return;
@@ -91,6 +96,7 @@ public final class AutoMine {
             msg(mc, "Area kegedean (maks 100.000 blok)");
             return;
         }
+        oreSearch = ore;
         running = true;
         ticks = 0;
         pause = 0;
@@ -101,7 +107,7 @@ public final class AutoMine {
         walkTarget = null;
         lastTarget = null;
         remaining = 0;
-        msg(mc, "Auto Mine mulai. Pegang pickaxe!");
+        msg(mc, ore ? "Cari " + ORES[oreMode()] + " mulai. Pegang pickaxe!" : "Auto Mine mulai. Pegang pickaxe!");
     }
 
     public static void stop(MinecraftClient mc, String why) {
@@ -121,8 +127,12 @@ public final class AutoMine {
         return Math.floorMod(Config.getInt("mine.ore", 0), ORES.length);
     }
 
+    public static boolean oreHidden() {
+        return Config.getBool("mine.hidden", true);
+    }
+
     private static double layerWeight() {
-        return oreMode() > 0 ? 0.0 : 1000.0;
+        return oreSearch ? 0.0 : 1000.0;
     }
 
     private static boolean exposed(ClientWorld w, BlockPos bp) {
@@ -138,19 +148,62 @@ public final class AutoMine {
         if (s.isAir()) return false;
         if (!s.getFluidState().isEmpty()) return false;
         if (s.getHardness(w, bp) < 0) return false;
-        int mode = oreMode();
-        if (mode > 0) {
+        if (oreSearch) {
             boolean match = false;
-            for (Block b : ORE_BLOCKS[mode]) {
+            for (Block b : ORE_BLOCKS[oreMode()]) {
                 if (s.isOf(b)) {
                     match = true;
                     break;
                 }
             }
             if (!match) return false;
-            return exposed(w, bp);
+            return oreHidden() || exposed(w, bp);
         }
         return true;
+    }
+
+    private static boolean solid(ClientWorld w, BlockPos bp) {
+        BlockState s = w.getBlockState(bp);
+        return !s.isAir() && s.getFluidState().isEmpty() && s.getHardness(w, bp) >= 0;
+    }
+
+    private static boolean fluidNear(ClientWorld w, BlockPos bp) {
+        if (!w.getBlockState(bp).getFluidState().isEmpty()) return true;
+        for (Direction d : Direction.values()) {
+            if (!w.getBlockState(bp.offset(d)).getFluidState().isEmpty()) return true;
+        }
+        return false;
+    }
+
+    private static BlockPos digTarget(ClientWorld w, ClientPlayerEntity p, Vec3d eye, BlockPos t) {
+        double tx = t.getX() + 0.5;
+        double ty = t.getY() + 0.5;
+        double tz = t.getZ() + 0.5;
+        double dx = tx - eye.x;
+        double dy = ty - eye.y;
+        double dz = tz - eye.z;
+        double len = Math.sqrt(dx * dx + dy * dy + dz * dz);
+        if (len > 0.01) {
+            double nx = dx / len;
+            double ny = dy / len;
+            double nz = dz / len;
+            double maxD = Math.min(len, REACH);
+            for (double d = 0.6; d <= maxD; d += 0.4) {
+                BlockPos bp = BlockPos.ofFloored(eye.x + nx * d, eye.y + ny * d, eye.z + nz * d);
+                if (bp.equals(t)) break;
+                if (solid(w, bp)) return bp;
+            }
+        }
+        double hlen = Math.sqrt(dx * dx + dz * dz);
+        if (hlen > 1.5) {
+            double hx = dx / hlen;
+            double hz = dz / hlen;
+            BlockPos feet = BlockPos.ofFloored(p.getX() + hx * 1.0, p.getY(), p.getZ() + hz * 1.0);
+            BlockPos head = feet.up();
+            if (solid(w, head)) return head;
+            if (solid(w, feet)) return feet;
+        }
+        return null;
     }
 
     private static float wrap(float a) {
@@ -258,7 +311,7 @@ public final class AutoMine {
                     double dy = y + 0.5 - eye.y;
                     double dz = z + 0.5 - eye.z;
                     double score = (y2 - y) * layerWeight() + dx * dx + dy * dy + dz * dz;
-                    if (Config.pick3 && oreMode() == 0 && !(((x - x1) % 3 == 1) && ((z - z1) % 3 == 1))) score += 700.0;
+                    if (Config.pick3 && !oreSearch && !(((x - x1) % 3 == 1) && ((z - z1) % 3 == 1))) score += 700.0;
                     if (score < bestScore) {
                         bestScore = score;
                         best = bp;
@@ -327,7 +380,7 @@ public final class AutoMine {
                     double d2 = dx * dx + dy * dy + dz * dz;
                     if (d2 > REACH * REACH) continue;
                     double score = (y2 - y) * layerWeight() + d2;
-                    if (Config.pick3 && oreMode() == 0 && !(((x - x1) % 3 == 1) && ((z - z1) % 3 == 1))) score += 700.0;
+                    if (Config.pick3 && !oreSearch && !(((x - x1) % 3 == 1) && ((z - z1) % 3 == 1))) score += 700.0;
                     if (score < bestScore) {
                         bestScore = score;
                         best = bp;
@@ -367,8 +420,29 @@ public final class AutoMine {
             fullScan(w, eye);
         }
         if (walkTarget == null) {
-            stop(mc, oreMode() > 0 ? "Tidak ada " + ORES[oreMode()] + " yang terlihat di area" : "Selesai! Area sudah bersih");
+            stop(mc, oreSearch ? "Tidak ada " + ORES[oreMode()] + " di area" : "Selesai! Area sudah bersih");
             return;
+        }
+        if (oreSearch) {
+            BlockPos dig = digTarget(w, p, eye, walkTarget);
+            if (dig != null) {
+                if (fluidNear(w, dig)) {
+                    stop(mc, "Ada cairan di depan, berhenti");
+                    return;
+                }
+                mc.options.forwardKey.setPressed(false);
+                walking = false;
+                float derr = aim(p, eye, dig.getX() + 0.5, dig.getY() + 0.5, dig.getZ() + 0.5, false, true);
+                if (derr < 6.0f) {
+                    Direction dside = Direction.getFacing(
+                            eye.x - (dig.getX() + 0.5),
+                            eye.y - (dig.getY() + 0.5),
+                            eye.z - (dig.getZ() + 0.5));
+                    mc.interactionManager.updateBlockBreakingProgress(dig, dside);
+                    p.swingHand(Hand.MAIN_HAND);
+                }
+                return;
+            }
         }
         if (Config.autoWalk) {
             float err2 = aim(p, eye, walkTarget.getX() + 0.5, walkTarget.getY() + 0.5, walkTarget.getZ() + 0.5, true, false);

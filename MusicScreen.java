@@ -13,10 +13,10 @@ import java.util.List;
 import java.util.Map;
 
 public class MusicScreen extends Screen {
-    private static final int ACCENT = 0x3A9BFF;
-    private static final int SIDE_W = 58;
-    private static final int CHIP_W = 74;
-    private static final String[] TABS = {"Hit", "Musik", "Radar", "Mine", "Area", "Visual", "Waypoint", "HUD"};
+    private static final int[] THEMES = {0x3A9BFF, 0xA06BFF, 0xFF5A5A, 0x35D36B, 0xFFA030};
+    private static final String[] THEME_NAMES = {"Biru", "Ungu", "Merah", "Hijau", "Oranye"};
+    private static final String[] TABS = {"Hit", "Musik", "Radar", "Mine", "Ore", "Area", "Visual", "Surv", "Titik", "HUD"};
+    private static final int[] TREE_RADII = {8, 12, 16, 24};
 
     private static int tab = 0;
     private static final Map<String, Float> TOGGLE = new HashMap<>();
@@ -24,34 +24,41 @@ public class MusicScreen extends Screen {
     private static long lastNano = 0L;
     private static long openedAt = 0L;
     private static long tabAt = 0L;
-    private static float indicatorY = 0.0f;
+    private static float indicatorX = 0.0f;
 
-    private static final class Row {
+    private static final class Card {
         String label;
         String key;
         int type;
         boolean on;
         String value;
+        int x;
         int y;
+        int w;
+        int h;
     }
 
-    private final List<Row> rows = new ArrayList<>();
+    private final List<Card> cards = new ArrayList<>();
     private List<String[]> hits;
     private List<String[]> songs;
     private int px;
     private int py;
     private int pw;
     private int ph;
-    private int x0;
-    private int cw;
-    private int rowY;
-    private int infoY;
+    private int tabW;
+    private int colW;
+
+    private static final int CARD_H = 32;
 
     public MusicScreen() {
         super(Text.literal("Polino Client"));
         openedAt = System.nanoTime();
         tabAt = openedAt;
-        indicatorY = 0.0f;
+        indicatorX = 0.0f;
+    }
+
+    private static int accent() {
+        return THEMES[Math.floorMod(Config.getInt("gui.theme", 0), THEMES.length)];
     }
 
     private ButtonWidget invisible(int x, int y, int w, int h, Runnable action) {
@@ -61,60 +68,60 @@ public class MusicScreen extends Screen {
         return b;
     }
 
-    private void addRow(int type, String label, boolean on, String value, Runnable action) {
-        Row r = new Row();
-        r.label = label;
-        r.key = tab + ":" + label;
-        r.type = type;
-        r.on = on;
-        r.value = value;
-        r.y = rowY;
-        rows.add(r);
-        invisible(x0 - 3, rowY, cw + 3, 18, action);
-        if (type == 0 && !TOGGLE.containsKey(r.key)) {
-            TOGGLE.put(r.key, on ? 1.0f : 0.0f);
+    private void addCard(int type, String label, boolean on, String value, Runnable action) {
+        int idx = cards.size();
+        Card c = new Card();
+        c.label = label;
+        c.key = tab + ":" + label;
+        c.type = type;
+        c.on = on;
+        c.value = value;
+        c.w = colW;
+        c.h = CARD_H;
+        c.x = px + 6 + (idx % 2) * (colW + 6);
+        c.y = py + 54 + (idx / 2) * (CARD_H + 5);
+        cards.add(c);
+        invisible(c.x, c.y, c.w, c.h, action);
+        if (type == 0 && !TOGGLE.containsKey(c.key)) {
+            TOGGLE.put(c.key, on ? 1.0f : 0.0f);
         }
-        rowY += 22;
-        infoY = rowY + 2;
     }
 
-    private void rowToggle(String label, boolean on, Runnable flip) {
-        addRow(0, label, on, "", () -> {
+    private void cardToggle(String label, boolean on, Runnable flip) {
+        addCard(0, label, on, "", () -> {
             flip.run();
             Config.save();
             clearAndInit();
         });
     }
 
-    private void rowCycle(String label, String value, Runnable next) {
-        addRow(1, label, false, value, () -> {
+    private void cardCycle(String label, String value, Runnable next) {
+        addCard(1, label, false, value, () -> {
             next.run();
             Config.save();
             clearAndInit();
         });
     }
 
-    private void rowAction(String label, String value, Runnable action) {
-        addRow(2, label, false, value, action);
+    private void cardAction(String label, String value, Runnable action) {
+        addCard(2, label, false, value, action);
     }
 
     @Override
     protected void init() {
-        rows.clear();
+        cards.clear();
         hits = Audio.hits();
         songs = Audio.songs();
-        pw = Math.min(280, this.width - 8);
-        ph = Math.min(196, this.height - 8);
+        pw = Math.min(400, this.width - 8);
+        ph = Math.min(262, this.height - 8);
         px = (this.width - pw) / 2;
         py = (this.height - ph) / 2;
-        x0 = px + SIDE_W + 12;
-        cw = pw - SIDE_W - 18;
-        rowY = py + 24;
-        infoY = rowY;
+        tabW = (pw - 12) / TABS.length;
+        colW = (pw - 18) / 2;
 
         for (int i = 0; i < TABS.length; i++) {
             final int idx = i;
-            invisible(px + 4, py + 24 + i * 20, SIDE_W, 18, () -> {
+            invisible(px + 6 + i * tabW, py + 28, tabW, 20, () -> {
                 if (tab != idx) {
                     tab = idx;
                     tabAt = System.nanoTime();
@@ -137,12 +144,18 @@ public class MusicScreen extends Screen {
                 buildMine();
                 break;
             case 4:
-                buildArea();
+                buildOre();
                 break;
             case 5:
-                buildVisual();
+                buildArea();
                 break;
             case 6:
+                buildVisual();
+                break;
+            case 7:
+                buildSurvival();
+                break;
+            case 8:
                 buildWaypoint();
                 break;
             default:
@@ -152,119 +165,163 @@ public class MusicScreen extends Screen {
     }
 
     private void buildHit() {
-        rowToggle("Suara Hit", Config.hitEnabled, () -> Config.hitEnabled = !Config.hitEnabled);
-        rowCycle("Jenis Suara", hits.get(Math.floorMod(Config.hitIndex, hits.size()))[0],
+        cardToggle("Suara Hit", Config.hitEnabled, () -> Config.hitEnabled = !Config.hitEnabled);
+        cardCycle("Jenis Suara", hits.get(Math.floorMod(Config.hitIndex, hits.size()))[0],
                 () -> Config.hitIndex = Math.floorMod(Config.hitIndex + 1, hits.size()));
-        rowCycle("Volume", Config.hitVol + "%", () -> Config.hitVol = Config.nextVol(Config.hitVol));
-        rowAction("Tes Suara", "Putar", () -> Audio.playHit());
+        cardCycle("Volume Hit", Config.hitVol + "%", () -> Config.hitVol = Config.nextVol(Config.hitVol));
+        cardAction("Tes Suara", "Putar", () -> Audio.playHit());
     }
 
     private void buildMusic() {
-        rowCycle("Lagu", songs.get(Math.floorMod(Config.songIndex, songs.size()))[0],
+        cardCycle("Lagu", songs.get(Math.floorMod(Config.songIndex, songs.size()))[0],
                 () -> Config.songIndex = Math.floorMod(Config.songIndex + 1, songs.size()));
-        rowAction("Lagu Sebelumnya", "<<", () -> {
+        cardAction("Lagu Sebelumnya", "<<", () -> {
             Config.songIndex = Math.floorMod(Config.songIndex - 1, songs.size());
             Config.save();
             clearAndInit();
         });
-        rowToggle("Musik", Audio.isPlaying(), () -> {
+        cardToggle("Musik", Audio.isPlaying(), () -> {
             if (Audio.isPlaying()) Audio.stopSong();
             else Audio.playSong();
         });
-        rowCycle("Volume", Config.songVol + "%", () -> Config.songVol = Config.nextVol(Config.songVol));
+        cardCycle("Volume Lagu", Config.songVol + "%", () -> Config.songVol = Config.nextVol(Config.songVol));
     }
 
     private void buildRadar() {
-        rowToggle("Spawner ESP", Config.showSpawner, () -> Config.showSpawner = !Config.showSpawner);
-        rowToggle("Chest ESP", Config.showChest, () -> Config.showChest = !Config.showChest);
-        rowToggle("Kotak Tembus", Config.espBox, () -> Config.espBox = !Config.espBox);
-        rowToggle("Garis Arah", Config.tracer, () -> Config.tracer = !Config.tracer);
-        rowToggle("Daftar di HUD", Config.showList, () -> Config.showList = !Config.showList);
+        cardToggle("Spawner ESP", Config.showSpawner, () -> Config.showSpawner = !Config.showSpawner);
+        cardToggle("Chest ESP", Config.showChest, () -> Config.showChest = !Config.showChest);
+        cardToggle("Kotak Tembus", Config.espBox, () -> Config.espBox = !Config.espBox);
+        cardToggle("Garis Arah", Config.tracer, () -> Config.tracer = !Config.tracer);
+        cardToggle("Daftar di HUD", Config.showList, () -> Config.showList = !Config.showList);
     }
 
     private void buildMine() {
-        addRow(0, "Auto Mine", AutoMine.running, "", () -> {
+        addCard(0, "Auto Mine", AutoMine.running && !AutoMine.oreSearch, "", () -> {
             MinecraftClient mc = MinecraftClient.getInstance();
             if (AutoMine.running) {
                 AutoMine.stop(mc, "Auto Mine dihentikan");
                 clearAndInit();
             } else {
-                AutoMine.start(mc);
+                AutoMine.start(mc, false);
                 if (AutoMine.running) this.close();
             }
         });
-        rowCycle("Kecepatan", AutoMine.SPEEDS[Config.mineSpeed], () -> Config.mineSpeed = (Config.mineSpeed + 1) % 3);
-        rowCycle("Gerakan", AutoMine.SMOOTHS[Config.mineSmooth], () -> Config.mineSmooth = (Config.mineSmooth + 1) % 3);
-        rowToggle("Acak Manusia", Config.mineJitter, () -> Config.mineJitter = !Config.mineJitter);
-        rowToggle("Auto Jalan", Config.autoWalk, () -> Config.autoWalk = !Config.autoWalk);
-        rowToggle("Pickaxe 3x3", Config.pick3, () -> Config.pick3 = !Config.pick3);
-        rowCycle("Target Ore", AutoMine.ORES[AutoMine.oreMode()],
+        cardCycle("Kecepatan", AutoMine.SPEEDS[Config.mineSpeed], () -> Config.mineSpeed = (Config.mineSpeed + 1) % 3);
+        cardCycle("Gerakan", AutoMine.SMOOTHS[Config.mineSmooth], () -> Config.mineSmooth = (Config.mineSmooth + 1) % 3);
+        cardToggle("Acak Manusia", Config.mineJitter, () -> Config.mineJitter = !Config.mineJitter);
+        cardToggle("Auto Jalan", Config.autoWalk, () -> Config.autoWalk = !Config.autoWalk);
+        cardToggle("Pickaxe 3x3", Config.pick3, () -> Config.pick3 = !Config.pick3);
+    }
+
+    private void buildOre() {
+        addCard(0, "Cari Ore", AutoMine.running && AutoMine.oreSearch, "", () -> {
+            MinecraftClient mc = MinecraftClient.getInstance();
+            if (AutoMine.running) {
+                AutoMine.stop(mc, "Cari Ore dihentikan");
+                clearAndInit();
+            } else {
+                AutoMine.start(mc, true);
+                if (AutoMine.running) this.close();
+            }
+        });
+        cardCycle("Target Ore", AutoMine.ORES[AutoMine.oreMode()],
                 () -> Config.setInt("mine.ore", (AutoMine.oreMode() + 1) % AutoMine.ORES.length));
+        cardToggle("Ore Tertutup", AutoMine.oreHidden(), () -> Config.setBool("mine.hidden", !AutoMine.oreHidden()));
     }
 
     private void buildArea() {
-        rowAction("Posisi 1", "Set", () -> setPos(1));
-        rowAction("Posisi 2", "Set", () -> setPos(2));
-        rowAction("Hapus Area", "Hapus", () -> {
+        cardAction("Posisi 1", "Set", () -> setPos(1));
+        cardAction("Posisi 2", "Set", () -> setPos(2));
+        cardAction("Hapus Area", "Hapus", () -> {
             Config.pos1 = null;
             Config.pos2 = null;
             Config.save();
             clearAndInit();
         });
-        rowToggle("Panic /spawn", Config.panic, () -> Config.panic = !Config.panic);
-        rowCycle("Radius Panic", AutoMine.RADII[Config.panicRadius] + "m",
+        cardToggle("Panic /spawn", Config.panic, () -> Config.panic = !Config.panic);
+        cardCycle("Radius Panic", AutoMine.RADII[Config.panicRadius] + "m",
                 () -> Config.panicRadius = (Config.panicRadius + 1) % AutoMine.RADII.length);
     }
 
     private void buildVisual() {
         Feature fb = Modules.get("fullbright");
         if (fb == null) {
-            rowAction("Fullbright", "N/A", () -> {
+            cardAction("Fullbright", "N/A", () -> {
             });
         } else {
-            rowToggle("Fullbright", fb.isOn(), () -> fb.setOn(!fb.isOn(), MinecraftClient.getInstance()));
+            cardToggle("Fullbright", fb.isOn(), () -> fb.setOn(!fb.isOn(), MinecraftClient.getInstance()));
         }
         Feature fc = Modules.get("freecam");
         if (fc == null) {
-            rowAction("Freecam", "N/A", () -> {
+            cardAction("Freecam", "N/A", () -> {
             });
         } else {
-            addRow(0, "Freecam", fc.isOn(), "", () -> {
+            addCard(0, "Freecam", fc.isOn(), "", () -> {
                 MinecraftClient mc = MinecraftClient.getInstance();
                 fc.setOn(!fc.isOn(), mc);
                 if (fc.isOn()) this.close();
                 else clearAndInit();
             });
         }
-        rowCycle("Speed Freecam", "x" + Config.getInt("freecam.speed", 2),
+        cardCycle("Speed Freecam", "x" + Config.getInt("freecam.speed", 2),
                 () -> Config.setInt("freecam.speed", Config.getInt("freecam.speed", 2) % 4 + 1));
-        rowToggle("Auto Sprint", Config.autoSprint, () -> Config.autoSprint = !Config.autoSprint);
+        cardToggle("Auto Sprint", Config.autoSprint, () -> Config.autoSprint = !Config.autoSprint);
+    }
+
+    private void buildSurvival() {
+        Feature tree = Modules.get("autotree");
+        if (tree == null) {
+            cardAction("Auto Tebang", "N/A", () -> {
+            });
+        } else {
+            addCard(0, "Auto Tebang", tree.isOn(), "", () -> {
+                MinecraftClient mc = MinecraftClient.getInstance();
+                tree.setOn(!tree.isOn(), mc);
+                if (tree.isOn()) this.close();
+                else clearAndInit();
+            });
+        }
+        cardCycle("Radius Tebang", Config.getInt("tree.radius", 12) + " blok", () -> {
+            int cur = Config.getInt("tree.radius", 12);
+            int next = TREE_RADII[0];
+            for (int i = 0; i < TREE_RADII.length; i++) {
+                if (TREE_RADII[i] == cur) {
+                    next = TREE_RADII[(i + 1) % TREE_RADII.length];
+                    break;
+                }
+            }
+            Config.setInt("tree.radius", next);
+        });
+        cardToggle("Tanam Ulang", Config.getBool("tree.replant", true),
+                () -> Config.setBool("tree.replant", !Config.getBool("tree.replant", true)));
+        cardToggle("Auto Respawn", Config.getBool("survival.respawn", false),
+                () -> Config.setBool("survival.respawn", !Config.getBool("survival.respawn", false)));
     }
 
     private void buildWaypoint() {
         Waypoints.WP cur = Waypoints.current();
-        rowToggle("Tampil Waypoint", Waypoints.show, () -> {
+        cardToggle("Tampil Titik", Waypoints.show, () -> {
             Waypoints.show = !Waypoints.show;
             Waypoints.save();
         });
-        rowCycle("Pilih", cur == null ? "-" : cur.name, () -> {
+        cardCycle("Pilih", cur == null ? "-" : cur.name, () -> {
             if (!Waypoints.list.isEmpty()) {
                 Waypoints.selected = Math.floorMod(Waypoints.selected + 1, Waypoints.list.size());
             }
         });
-        rowAction("Tambah", "Di Sini", () -> {
+        cardAction("Tambah", "Di Sini", () -> {
             Waypoints.addHere(MinecraftClient.getInstance());
             clearAndInit();
         });
-        rowAction("Hapus", "Terpilih", () -> {
+        cardAction("Hapus", "Terpilih", () -> {
             Waypoints.removeSelected();
             clearAndInit();
         });
         if (cur == null) {
-            rowAction("Aktif", "-", () -> {
+            cardAction("Aktif", "-", () -> {
             });
         } else {
-            rowToggle("Aktif", cur.on, () -> {
+            cardToggle("Aktif", cur.on, () -> {
                 cur.on = !cur.on;
                 Waypoints.save();
             });
@@ -272,14 +329,16 @@ public class MusicScreen extends Screen {
     }
 
     private void buildHud() {
-        rowAction("Edit HUD", "Buka", () -> MinecraftClient.getInstance().setScreen(new HudEditScreen(this)));
-        rowAction("Reset HUD", "Reset", () -> {
+        cardAction("Edit HUD", "Buka", () -> MinecraftClient.getInstance().setScreen(new HudEditScreen(this)));
+        cardAction("Reset HUD", "Reset", () -> {
             HudLayout.resetAll();
             Config.save();
             clearAndInit();
         });
-        rowAction("Set Base", "Set", () -> setBase(true));
-        rowAction("Hapus Base", "Hapus", () -> setBase(false));
+        cardAction("Set Base", "Set", () -> setBase(true));
+        cardAction("Hapus Base", "Hapus", () -> setBase(false));
+        cardCycle("Tema GUI", THEME_NAMES[Math.floorMod(Config.getInt("gui.theme", 0), THEMES.length)],
+                () -> Config.setInt("gui.theme", (Config.getInt("gui.theme", 0) + 1) % THEMES.length));
     }
 
     private void setPos(int n) {
@@ -320,124 +379,141 @@ public class MusicScreen extends Screen {
         return (r << 16) | (g << 8) | bl;
     }
 
-    private void info(DrawContext ctx, String s, int y, int color) {
-        ctx.drawTextWithShadow(this.textRenderer, Text.literal(s), x0 + 2, y, color);
-    }
-
     private static String fmt(BlockPos p) {
         return p == null ? "belum diset" : p.getX() + " " + p.getY() + " " + p.getZ();
+    }
+
+    private String infoText() {
+        switch (tab) {
+            case 0:
+                return "Suara bawaan atau custom (hit.ogg di repo)";
+            case 1:
+                return "Status: " + (Audio.isPlaying() ? "memutar" : "berhenti");
+            case 2:
+                return Finder.spawnerCount + " spawner, " + Finder.chestCount + " chest terdeteksi";
+            case 3:
+                return "Pegang pickaxe. Area diatur di tab Area.";
+            case 4:
+                return "Cari " + AutoMine.ORES[AutoMine.oreMode()] + (AutoMine.oreHidden() ? " (tembus batu)" : " (yang terlihat)")
+                        + ". Area di tab Area.";
+            case 5:
+                return "P1: " + fmt(Config.pos1) + "  P2: " + fmt(Config.pos2) + "  (" + AutoMine.volume() + " blok)";
+            case 6:
+                return "Freecam: W A S D, Spasi naik, Shift turun, Ctrl cepat";
+            case 7:
+                return "Kapak di tangan kanan, sapling di tangan kiri";
+            case 8: {
+                Waypoints.WP w = Waypoints.current();
+                if (w == null) return "Belum ada titik";
+                return w.name + ": " + w.x + " " + w.y + " " + w.z + "  (" + (Waypoints.selected + 1) + "/" + Waypoints.list.size() + ")";
+            }
+            default:
+                return "Base: " + fmt(Config.base);
+        }
     }
 
     @Override
     public void render(DrawContext context, int mouseX, int mouseY, float delta) {
         super.render(context, mouseX, mouseY, delta);
 
+        int acc = accent();
         long now = System.nanoTime();
         float dt = lastNano == 0L ? 0.016f : Math.min(0.05f, (now - lastNano) / 1.0e9f);
         lastNano = now;
 
-        float e = ease((now - openedAt) / 260.0e6f);
+        float e = ease((now - openedAt) / 280.0e6f);
         int a = (int) (e * 255.0f);
-        int oy = (int) ((1.0f - e) * 16.0f);
+        int oy = (int) ((1.0f - e) * 18.0f);
         int py2 = py + oy;
-        float ct = clamp01((now - tabAt) / 300.0e6f);
+        float ct = clamp01((now - tabAt) / 320.0e6f);
 
-        context.fill(px - 1, py2 - 1, px + pw + 1, py2 + ph + 1, c(a, ACCENT));
-        context.fill(px, py2, px + pw, py2 + ph, c(Math.min(a, 0xF2), 0x101018));
-        context.fill(px, py2, px + pw, py2 + 18, c(a, 0x0A0A12));
-        context.fill(px, py2 + 18, px + pw, py2 + 19, c(a, ACCENT));
-        context.fill(px, py2 + 19, px + SIDE_W + 7, py2 + ph, c(a, 0x0A0A12));
+        context.fill(px - 1, py2 - 1, px + pw + 1, py2 + ph + 1, c(a, acc));
+        context.fill(px, py2, px + pw, py2 + ph, c(Math.min(a, 0xF4), 0x0E0E16));
+        context.fill(px, py2, px + pw, py2 + 26, c(a, 0x08080E));
+        context.fill(px, py2 + 26, px + pw, py2 + 27, c(a, lerpRgb(0x0E0E16, acc, 0.6f)));
+        context.fill(px, py2 + 27, px + pw, py2 + 49, c(a, 0x0A0A12));
+        context.fill(px, py2 + ph - 18, px + pw, py2 + ph, c(a, 0x08080E));
 
         if (e > 0.3f) {
             context.drawTextWithShadow(this.textRenderer,
-                    Text.literal("\u00a7b\u00a7lPolino \u00a7f\u00a7lClient"), px + 8, py2 + 5, 0xFFFFFFFF);
-            context.drawTextWithShadow(this.textRenderer, Text.literal("v3"), px + pw - 18, py2 + 5, 0xFF888888);
+                    Text.literal("\u00a7l\u00a7bPolino \u00a7f\u00a7lClient"), px + 10, py2 + 9, 0xFFFFFFFF);
+            context.drawTextWithShadow(this.textRenderer, Text.literal("v4"), px + pw - 18, py2 + 9, 0xFF888888);
         }
 
-        float targetInd = tab * 20.0f;
-        indicatorY += (targetInd - indicatorY) * (1.0f - (float) Math.exp(-dt * 16.0f));
-        int indY = py2 + 24 + (int) indicatorY;
-        context.fill(px + 3, indY, px + SIDE_W + 5, indY + 18, c((int) (a * 0.30f), ACCENT));
-        context.fill(px + 3, indY, px + 5, indY + 18, c(a, ACCENT));
+        float targetX = px + 6 + tab * tabW;
+        indicatorX += (targetX - indicatorX) * (1.0f - (float) Math.exp(-dt * 16.0f));
+        if (indicatorX < px) indicatorX = targetX;
+        int ix = (int) indicatorX;
+        context.fill(ix, py2 + 29, ix + tabW, py2 + 47, c((int) (a * 0.22f), acc));
+        context.fill(ix, py2 + 45, ix + tabW, py2 + 47, c(a, acc));
 
         for (int i = 0; i < TABS.length; i++) {
-            int ty = py2 + 24 + i * 20;
-            boolean hv = mouseX >= px + 4 && mouseX <= px + 4 + SIDE_W && mouseY >= py + 24 + i * 20 && mouseY <= py + 24 + i * 20 + 18;
+            int tx = px + 6 + i * tabW;
+            boolean hv = mouseX >= tx && mouseX <= tx + tabW && mouseY >= py + 28 && mouseY <= py + 48;
             int color = i == tab ? 0xFFFFFFFF : (hv ? 0xFFD0E4FF : 0xFF8FA0B8);
             if (e > 0.3f) {
-                context.drawTextWithShadow(this.textRenderer, Text.literal(TABS[i]), px + 12, ty + 5, color);
+                int tw = this.textRenderer.getWidth(TABS[i]);
+                context.drawTextWithShadow(this.textRenderer, Text.literal(TABS[i]), tx + (tabW - tw) / 2, py2 + 34, color);
             }
         }
 
-        for (int i = 0; i < rows.size(); i++) {
-            Row r = rows.get(i);
-            float er = ease(ct * 1.5f - i * 0.12f);
+        for (int i = 0; i < cards.size(); i++) {
+            Card cd = cards.get(i);
+            float er = ease(ct * 1.6f - i * 0.09f);
             if (er <= 0.01f) continue;
-            int ra = (int) (a * er);
-            int xo = (int) ((1.0f - er) * 16.0f);
-            int ry = r.y + oy;
+            int ca = (int) (a * er);
+            int yo = (int) ((1.0f - er) * 12.0f);
+            int cx = cd.x;
+            int cyy = cd.y + oy + yo;
 
-            boolean hv = mouseX >= x0 - 3 && mouseX <= x0 + cw && mouseY >= r.y && mouseY <= r.y + 18;
-            float h = HOVER.containsKey(r.key) ? HOVER.get(r.key) : 0.0f;
+            boolean hv = mouseX >= cd.x && mouseX <= cd.x + cd.w && mouseY >= cd.y && mouseY <= cd.y + cd.h;
+            float h = HOVER.containsKey(cd.key) ? HOVER.get(cd.key) : 0.0f;
             h += ((hv ? 1.0f : 0.0f) - h) * (1.0f - (float) Math.exp(-dt * 16.0f));
-            HOVER.put(r.key, h);
+            HOVER.put(cd.key, h);
 
-            context.fill(x0 - 3 + xo, ry, x0 + cw + xo, ry + 18, c(ra, lerpRgb(0x1A1F2B, 0x2A3350, h)));
+            float tp = 0.0f;
+            if (cd.type == 0) {
+                tp = TOGGLE.containsKey(cd.key) ? TOGGLE.get(cd.key) : (cd.on ? 1.0f : 0.0f);
+                tp += ((cd.on ? 1.0f : 0.0f) - tp) * (1.0f - (float) Math.exp(-dt * 14.0f));
+                TOGGLE.put(cd.key, tp);
+            }
+
+            int bg = lerpRgb(0x181D29, 0x222A3D, h);
+            if (cd.type == 0) {
+                bg = lerpRgb(bg, lerpRgb(0x181D29, acc, 0.38f), tp);
+            }
+            context.fill(cx, cyy, cx + cd.w, cyy + cd.h, c(ca, bg));
+            int barColor = lerpRgb(0x2A3350, acc, Math.max(h, tp));
+            context.fill(cx, cyy, cx + 3, cyy + cd.h, c(ca, barColor));
             if (h > 0.05f) {
-                context.fill(x0 - 3 + xo, ry, x0 - 1 + xo, ry + 18, c((int) (ra * h), ACCENT));
-            }
-            if (er > 0.4f) {
-                context.drawTextWithShadow(this.textRenderer, Text.literal(r.label), x0 + 5 + xo, ry + 5, 0xFFFFFFFF);
+                context.fill(cx, cyy + cd.h - 1, cx + cd.w, cyy + cd.h, c((int) (ca * h), acc));
             }
 
-            if (r.type == 0) {
-                float tp = TOGGLE.containsKey(r.key) ? TOGGLE.get(r.key) : (r.on ? 1.0f : 0.0f);
-                tp += ((r.on ? 1.0f : 0.0f) - tp) * (1.0f - (float) Math.exp(-dt * 14.0f));
-                TOGGLE.put(r.key, tp);
-                int tx = x0 + cw - 32 + xo;
-                int ty = ry + 3;
-                context.fill(tx, ty, tx + 26, ty + 12, c(ra, lerpRgb(0x3B4252, 0x35D36B, tp)));
-                int kx = tx + 1 + (int) (14.0f * tp);
-                context.fill(kx, ty + 1, kx + 10, ty + 11, c(ra, 0xFFFFFF));
-            } else {
-                int chx = x0 + cw - CHIP_W - 3 + xo;
-                int chipBg = r.type == 2 ? lerpRgb(0x2D6FB8, ACCENT, h) : lerpRgb(0x252B3A, 0x33405E, h);
-                context.fill(chx, ry + 2, chx + CHIP_W, ry + 16, c(ra, chipBg));
-                if (er > 0.4f) {
-                    int tw = this.textRenderer.getWidth(r.value);
-                    context.drawTextWithShadow(this.textRenderer, Text.literal(r.value),
-                            chx + (CHIP_W - tw) / 2, ry + 5, r.type == 1 ? 0xFF9FD0FF : 0xFFFFFFFF);
+            if (er > 0.4f) {
+                context.drawTextWithShadow(this.textRenderer, Text.literal(cd.label), cx + 10, cyy + 6, 0xFFFFFFFF);
+                if (cd.type == 0) {
+                    context.drawTextWithShadow(this.textRenderer, Text.literal(cd.on ? "ON" : "OFF"), cx + 10, cyy + 19,
+                            cd.on ? 0xFF6BFF9A : 0xFF8A93A6);
+                } else if (cd.type == 1) {
+                    context.drawTextWithShadow(this.textRenderer, Text.literal(cd.value), cx + 10, cyy + 19,
+                            0xFF000000 | lerpRgb(acc, 0xFFFFFF, 0.55f));
+                } else {
+                    context.drawTextWithShadow(this.textRenderer, Text.literal(cd.value), cx + 10, cyy + 19, 0xFFC8D2E4);
                 }
+            }
+            if (cd.type == 0) {
+                int tx = cx + cd.w - 34;
+                int ty = cyy + 10;
+                context.fill(tx, ty, tx + 26, ty + 12, c(ca, lerpRgb(0x3B4252, 0x35D36B, tp)));
+                int kx = tx + 1 + (int) (14.0f * tp);
+                context.fill(kx, ty + 1, kx + 10, ty + 11, c(ca, 0xFFFFFF));
+            } else if (cd.type == 1 && er > 0.4f) {
+                context.drawTextWithShadow(this.textRenderer, Text.literal(">"), cx + cd.w - 12, cyy + 12, 0xFF8FA0B8);
             }
         }
 
-        if (ct > 0.6f) {
-            int iy = infoY + oy;
-            if (tab == 1) {
-                info(context, "Status: " + (Audio.isPlaying() ? "memutar" : "berhenti"), iy, 0xFFAAAAAA);
-            } else if (tab == 2) {
-                info(context, Finder.spawnerCount + " spawner, " + Finder.chestCount + " chest terdeteksi", iy, 0xFFAAAAAA);
-                info(context, "Merah = spawner, Oranye = chest", iy + 10, 0xFF777777);
-            } else if (tab == 3) {
-                info(context, "Pegang pickaxe. Area diatur di tab Area.", iy, 0xFF777777);
-                info(context, "Ore: hanya yang terlihat (nempel udara)", iy + 10, 0xFF777777);
-            } else if (tab == 4) {
-                info(context, "P1: " + fmt(Config.pos1) + "   P2: " + fmt(Config.pos2), iy, 0xFFAAAAAA);
-                info(context, "Ukuran: " + AutoMine.volume() + " blok", iy + 10, 0xFFAAAAAA);
-            } else if (tab == 5) {
-                info(context, "Freecam: W A S D, Spasi naik, Shift turun, Ctrl cepat", iy, 0xFF777777);
-            } else if (tab == 6) {
-                Waypoints.WP w = Waypoints.current();
-                if (w == null) {
-                    info(context, "Belum ada waypoint", iy, 0xFFAAAAAA);
-                } else {
-                    info(context, w.name + ": " + w.x + " " + w.y + " " + w.z, iy, 0xFFAAAAAA);
-                    info(context, (Waypoints.selected + 1) + " dari " + Waypoints.list.size(), iy + 10, 0xFF777777);
-                }
-            } else if (tab == 7) {
-                info(context, "Base: " + fmt(Config.base), iy, 0xFFAAAAAA);
-                info(context, "Edit HUD: pilih elemen, geser, ON/OFF", iy + 10, 0xFF777777);
-            }
+        if (ct > 0.5f) {
+            context.drawTextWithShadow(this.textRenderer, Text.literal(infoText()), px + 10, py2 + ph - 13, 0xFFAAB4C6);
         }
     }
 

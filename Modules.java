@@ -10,7 +10,7 @@ import java.util.Map;
 
 public final class Modules {
     private static final Map<String, Feature> MAP = new LinkedHashMap<>();
-    private static final String[] CLASSES = {"com.hitmusic.Fullbright", "com.hitmusic.Freecam"};
+    private static final String[] CLASSES = {"com.hitmusic.Fullbright", "com.hitmusic.Freecam", "com.hitmusic.AutoTree"};
 
     private Modules() {}
 
