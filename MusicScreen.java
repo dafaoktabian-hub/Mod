@@ -206,11 +206,21 @@ public class MusicScreen extends Screen {
                 if (AutoMine.running) this.close();
             }
         });
+        cardCycle("Mode Gali", Config.getInt("mine.mode", 0) == 1 ? "3x3 Depan" : "Biasa",
+                () -> Config.setInt("mine.mode", Config.getInt("mine.mode", 0) == 1 ? 0 : 1));
         cardCycle("Kecepatan", AutoMine.SPEEDS[Config.mineSpeed], () -> Config.mineSpeed = (Config.mineSpeed + 1) % 3);
-        cardCycle("Gerakan", AutoMine.SMOOTHS[Config.mineSmooth], () -> Config.mineSmooth = (Config.mineSmooth + 1) % 3);
+        cardCycle("Kehalusan Kamera", AutoMine.SMOOTHS[Config.mineSmooth], () -> Config.mineSmooth = (Config.mineSmooth + 1) % 3);
+        cardCycle("Jarak Gali", (Config.getInt("mine.range10", 45) / 10.0) + " blok", () -> {
+            int cur = Config.getInt("mine.range10", 45);
+            Config.setInt("mine.range10", cur >= 45 ? 30 : cur + 5);
+        });
+        cardToggle("Batas Aman", Config.getBool("mine.protect", true),
+                () -> Config.setBool("mine.protect", !Config.getBool("mine.protect", true)));
         cardToggle("Acak Manusia", Config.mineJitter, () -> Config.mineJitter = !Config.mineJitter);
         cardToggle("Auto Jalan", Config.autoWalk, () -> Config.autoWalk = !Config.autoWalk);
-        cardToggle("Pickaxe 3x3", Config.pick3, () -> Config.pick3 = !Config.pick3);
+        cardToggle("Hammer 3x3", Config.pick3, () -> Config.pick3 = !Config.pick3);
+        cardToggle("Tampil Batas", Config.getBool("mine.showBox", true),
+                () -> Config.setBool("mine.showBox", !Config.getBool("mine.showBox", true)));
     }
 
     private void buildOre() {
@@ -392,7 +402,8 @@ public class MusicScreen extends Screen {
             case 2:
                 return Finder.spawnerCount + " spawner, " + Finder.chestCount + " chest terdeteksi";
             case 3:
-                return "Pegang pickaxe. Area diatur di tab Area.";
+                return Config.getInt("mine.mode", 0) == 1 ? "3x3: terowongan searah pandangan, berhenti di batas Area"
+                        : "Pegang pickaxe. Area diatur di tab Area.";
             case 4:
                 return "Cari " + AutoMine.ORES[AutoMine.oreMode()] + (AutoMine.oreHidden() ? " (tembus batu)" : " (yang terlihat)")
                         + ". Area di tab Area.";

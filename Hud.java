@@ -168,6 +168,36 @@ public final class Hud {
         }
     }
 
+    private static void drawBoundary(DrawContext ctx) {
+        int[] b = AutoMine.displayBounds();
+        if (b == null) return;
+        double x1 = b[0];
+        double y1 = b[1];
+        double z1 = b[2];
+        double x2 = b[3] + 1.0;
+        double y2 = b[4] + 1.0;
+        double z2 = b[5] + 1.0;
+        double[] o = new double[3];
+        boolean[] ok = new boolean[8];
+        int[][] pt = new int[8][2];
+        for (int i = 0; i < 8; i++) {
+            double cx = (i & 1) == 0 ? x1 : x2;
+            double cy = ((i >> 1) & 1) == 0 ? y1 : y2;
+            double cz = ((i >> 2) & 1) == 0 ? z1 : z2;
+            ok[i] = project(cx, cy, cz, o);
+            if (ok[i]) {
+                pt[i][0] = (int) Math.max(-4000, Math.min(4000, o[0]));
+                pt[i][1] = (int) Math.max(-4000, Math.min(4000, o[1]));
+            }
+        }
+        int[][] edges = {{0, 1}, {2, 3}, {4, 5}, {6, 7}, {0, 2}, {1, 3}, {4, 6}, {5, 7}, {0, 4}, {1, 5}, {2, 6}, {3, 7}};
+        for (int[] e : edges) {
+            if (ok[e[0]] && ok[e[1]]) {
+                line(ctx, pt[e[0]][0], pt[e[0]][1], pt[e[1]][0], pt[e[1]][1], 0xFFFFDD55);
+            }
+        }
+    }
+
     public static void render(DrawContext ctx, RenderTickCounter tickCounter) {
         MinecraftClient mc = MinecraftClient.getInstance();
 
@@ -191,6 +221,7 @@ public final class Hud {
         setup(mc, p);
         drawEsp(ctx, mc);
         drawWaypoints(ctx, mc);
+        drawBoundary(ctx);
         HudLayout.drawAll(ctx, mc, p, false);
         Modules.hud(ctx, mc);
     }
