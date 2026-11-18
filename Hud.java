@@ -170,6 +170,7 @@ public final class Hud {
 
     private static void drawBoundary(DrawContext ctx) {
         int[] b = AutoMine.displayBounds();
+        if (b == null) b = Modules.bounds();
         if (b == null) return;
         double x1 = b[0];
         double y1 = b[1];

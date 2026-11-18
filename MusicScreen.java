@@ -15,7 +15,7 @@ import java.util.Map;
 public class MusicScreen extends Screen {
     private static final int[] THEMES = {0x3A9BFF, 0xA06BFF, 0xFF5A5A, 0x35D36B, 0xFFA030};
     private static final String[] THEME_NAMES = {"Biru", "Ungu", "Merah", "Hijau", "Oranye"};
-    private static final String[] TABS = {"Hit", "Musik", "Radar", "Mine", "Ore", "Area", "Visual", "Surv", "Titik", "HUD"};
+    private static final String[] TABS = {"Hit", "Musik", "Radar", "Mine", "Lurus", "Ore", "Area", "Visual", "Surv", "Titik", "HUD"};
     private static final int[] TREE_RADII = {8, 12, 16, 24};
 
     private static int tab = 0;
@@ -112,7 +112,7 @@ public class MusicScreen extends Screen {
         cards.clear();
         hits = Audio.hits();
         songs = Audio.songs();
-        pw = Math.min(400, this.width - 8);
+        pw = Math.min(440, this.width - 8);
         ph = Math.min(262, this.height - 8);
         px = (this.width - pw) / 2;
         py = (this.height - ph) / 2;
@@ -144,24 +144,55 @@ public class MusicScreen extends Screen {
                 buildMine();
                 break;
             case 4:
-                buildOre();
+                buildPick();
                 break;
             case 5:
-                buildArea();
+                buildOre();
                 break;
             case 6:
-                buildVisual();
+                buildArea();
                 break;
             case 7:
-                buildSurvival();
+                buildVisual();
                 break;
             case 8:
+                buildSurvival();
+                break;
+            case 9:
                 buildWaypoint();
                 break;
             default:
                 buildHud();
                 break;
         }
+    }
+
+    private void stopPick() {
+        Feature pm = Modules.get("pickmine");
+        if (pm != null && pm.isOn()) pm.setOn(false, MinecraftClient.getInstance());
+    }
+
+    private void buildPick() {
+        Feature pm = Modules.get("pickmine");
+        if (pm == null) {
+            cardAction("Pickaxe Mining", "N/A", () -> {
+            });
+        } else {
+            addCard(0, "Pickaxe Mining", pm.isOn(), "", () -> {
+                MinecraftClient mc = MinecraftClient.getInstance();
+                pm.setOn(!pm.isOn(), mc);
+                if (pm.isOn()) this.close();
+                else clearAndInit();
+            });
+        }
+        cardCycle("Mode", Config.getInt("pick.mode", 0) == 1 ? "Auto" : "Manual",
+                () -> Config.setInt("pick.mode", Config.getInt("pick.mode", 0) == 1 ? 0 : 1));
+        cardCycle("Kecepatan", AutoMine.SPEEDS[Config.mineSpeed], () -> Config.mineSpeed = (Config.mineSpeed + 1) % 3);
+        cardCycle("Kehalusan Kamera", AutoMine.SMOOTHS[Config.mineSmooth], () -> Config.mineSmooth = (Config.mineSmooth + 1) % 3);
+        cardToggle("Batas Aman", Config.getBool("mine.protect", true),
+                () -> Config.setBool("mine.protect", !Config.getBool("mine.protect", true)));
+        cardToggle("Tampil Batas", Config.getBool("mine.showBox", true),
+                () -> Config.setBool("mine.showBox", !Config.getBool("mine.showBox", true)));
     }
 
     private void buildHit() {
@@ -202,6 +233,7 @@ public class MusicScreen extends Screen {
                 AutoMine.stop(mc, "Auto Mine dihentikan");
                 clearAndInit();
             } else {
+                stopPick();
                 AutoMine.start(mc, false);
                 if (AutoMine.running) this.close();
             }
@@ -230,6 +262,7 @@ public class MusicScreen extends Screen {
                 AutoMine.stop(mc, "Cari Ore dihentikan");
                 clearAndInit();
             } else {
+                stopPick();
                 AutoMine.start(mc, true);
                 if (AutoMine.running) this.close();
             }
@@ -405,15 +438,18 @@ public class MusicScreen extends Screen {
                 return Config.getInt("mine.mode", 0) == 1 ? "3x3: terowongan searah pandangan, berhenti di batas Area"
                         : "Pegang pickaxe. Area diatur di tab Area.";
             case 4:
+                return Config.getInt("pick.mode", 0) == 1 ? "Auto: gali lurus 1 blok, jalan maju sendiri, kamera halus"
+                        : "Manual: tahan serang di blok yang lu tatap, kamera tetap kontrol lu";
+            case 5:
                 return "Cari " + AutoMine.ORES[AutoMine.oreMode()] + (AutoMine.oreHidden() ? " (tembus batu)" : " (yang terlihat)")
                         + ". Area di tab Area.";
-            case 5:
-                return "P1: " + fmt(Config.pos1) + "  P2: " + fmt(Config.pos2) + "  (" + AutoMine.volume() + " blok)";
             case 6:
-                return "Freecam: W A S D, Spasi naik, Shift turun, Ctrl cepat";
+                return "P1: " + fmt(Config.pos1) + "  P2: " + fmt(Config.pos2) + "  (" + AutoMine.volume() + " blok)";
             case 7:
+                return "Freecam: W A S D, Spasi naik, Shift turun, Ctrl cepat";
+            case 8:
                 return "Kapak di tangan kanan, sapling di tangan kiri";
-            case 8: {
+            case 9: {
                 Waypoints.WP w = Waypoints.current();
                 if (w == null) return "Belum ada titik";
                 return w.name + ": " + w.x + " " + w.y + " " + w.z + "  (" + (Waypoints.selected + 1) + "/" + Waypoints.list.size() + ")";

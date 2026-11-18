@@ -28,4 +28,8 @@ public interface Feature {
     default Vec3d cameraPos() {
         return null;
     }
+
+    default int[] bounds() {
+        return null;
+    }
 }
