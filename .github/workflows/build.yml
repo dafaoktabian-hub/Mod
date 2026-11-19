@@ -71,7 +71,7 @@ jobs:
           loader_version=0.18.1
           loom_version=1.14-SNAPSHOT
           fabric_api_version=0.138.3+1.21.10
-          mod_version=3.0.0
+          mod_version=4.0.0
           maven_group=com.hitmusic
           archives_base_name=hitmusic
           EOF_FILE
@@ -112,16 +112,64 @@ jobs:
           }
           EOF_FILE
           cp ../*.java src/main/java/com/hitmusic/
-          SND=src/main/resources/assets/hitmusic/sounds
-          cp ../song*.ogg $SND/ 2>/dev/null || true
-          cp ../hit.ogg $SND/ 2>/dev/null || true
-          { echo '{'; echo '"hit":{"sounds":[{"name":"hitmusic:hit"}]}'; for i in 1 2 3 4 5 6 7 8 9 10; do echo ",\"song$i\":{\"sounds\":[{\"name\":\"hitmusic:song$i\",\"stream\":true}]}"; done; echo '}'; } > src/main/resources/assets/hitmusic/sounds.json
+          command -v ffmpeg >/dev/null || (sudo apt-get update -qq && sudo apt-get install -y -qq ffmpeg)
+          mkdir -p _music _unz
+          for z in ../*.zip; do
+            [ -e "$z" ] || continue
+            unzip -o -q "$z" -d "_unz/$(basename "${z%.*}")" || echo "gagal unzip $z"
+          done
+          collect() {
+            f="$1"
+            b=$(basename "${f%.*}")
+            ext=$(echo "${f##*.}" | tr 'A-Z' 'a-z')
+            if [ "$ext" = "ogg" ]; then
+              cp "$f" "_music/$b.ogg"
+            else
+              ffmpeg -nostdin -y -loglevel error -i "$f" -vn -map_metadata -1 -c:a libvorbis -q:a 3 -ar 44100 "_music/$b.ogg" || echo "gagal convert $f"
+            fi
+          }
+          find .. _unz -maxdepth 4 -type f \( -iname '*.ogg' -o -iname '*.mp3' -o -iname '*.m4a' -o -iname '*.wav' -o -iname '*.flac' \) -not -path '../_build/*' -print0 | while IFS= read -r -d '' f; do collect "$f"; done
+          python3 - <<'PYEOF'
+          import glob, json, os, re, shutil
+          snd = 'src/main/resources/assets/hitmusic/sounds'
+          os.makedirs(snd, exist_ok=True)
+          TITLES = {'song1': 'Eyes Blue X Terpikat Senyummu', 'song2': 'The One That Got Away', 'song3': 'Mau Dibawa Kemana',
+                    'song4': 'COOOK PARDON', 'song5': 'Nina', 'song6': 'Anti-Hero'}
+          events = {'hit': {'sounds': [{'name': 'hitmusic:hit'}]}}
+          rows = []
+          used = set()
+          for f in sorted(glob.glob('_music/*.ogg'), key=lambda p: os.path.basename(p).lower()):
+              base = os.path.basename(f)[:-4]
+              if base.lower() == 'hit':
+                  shutil.copy(f, snd + '/hit.ogg')
+                  continue
+              sid = re.sub(r'[^a-z0-9_]', '_', base.lower())
+              n = sid
+              i = 2
+              while n in used or n == 'hit':
+                  n = sid + '_' + str(i)
+                  i += 1
+              used.add(n)
+              shutil.copy(f, snd + '/' + n + '.ogg')
+              events[n] = {'sounds': [{'name': 'hitmusic:' + n, 'stream': True}]}
+              t = re.sub(r'(?i)[_ -]*spotdown[_ .-]*org$', '', base)
+              t = re.sub(r'_+', ' ', t)
+              t = re.sub(r'\s+', ' ', t).strip()
+              t = re.sub(r'^\d{1,3}\s*[-._)]\s*', '', t).strip() or base
+              rows.append((TITLES.get(sid, t), n))
+          rows.sort(key=lambda r: r[0].lower())
+          json.dump(events, open('src/main/resources/assets/hitmusic/sounds.json', 'w'))
+          open('src/main/resources/assets/hitmusic/songs.txt', 'w', encoding='utf-8').write('\n'.join(n + '|' + t for t, n in rows) + '\n')
+          print(len(rows), 'lagu terdaftar')
+          PYEOF
           ls src/main/java/com/hitmusic
+          cat src/main/resources/assets/hitmusic/songs.txt
 
       - name: Build
         working-directory: _build
         run: |
           echo "### Java files: $(ls ../*.java | xargs -n1 basename | tr '\n' ' ')" >> $GITHUB_STEP_SUMMARY
+          echo "### Lagu: $(wc -l < src/main/resources/assets/hitmusic/songs.txt) terdaftar" >> $GITHUB_STEP_SUMMARY
           if ! gradle build --no-daemon > build.log 2>&1; then
             echo '### ERROR BUILD' >> $GITHUB_STEP_SUMMARY
             echo '```' >> $GITHUB_STEP_SUMMARY
