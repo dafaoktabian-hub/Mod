@@ -4,6 +4,7 @@ import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.gui.DrawContext;
 import net.minecraft.client.gui.screen.Screen;
 import net.minecraft.client.gui.widget.ButtonWidget;
+import net.minecraft.client.gui.widget.TextFieldWidget;
 import net.minecraft.text.Text;
 import net.minecraft.util.math.BlockPos;
 
@@ -15,10 +16,14 @@ import java.util.Map;
 public class MusicScreen extends Screen {
     private static final int[] THEMES = {0x3A9BFF, 0xA06BFF, 0xFF5A5A, 0x35D36B, 0xFFA030};
     private static final String[] THEME_NAMES = {"Biru", "Ungu", "Merah", "Hijau", "Oranye"};
-    private static final String[] TABS = {"Hit", "Musik", "Radar", "Mine", "Lurus", "Ore", "Area", "Visual", "Surv", "Titik", "HUD"};
+    private static final String[] TABS = {"Hit", "Musik", "Lagu", "Radar", "Mine", "Lurus", "Ore", "Area", "Visual", "Surv", "Titik", "HUD"};
     private static final int[] TREE_RADII = {8, 12, 16, 24};
 
     private static int tab = 0;
+    private static final int PROWS = 6;
+    private static String pQuery = "";
+    private static String pLetter = "";
+    private static int pPage = 0;
     private static final Map<String, Float> TOGGLE = new HashMap<>();
     private static final Map<String, Float> HOVER = new HashMap<>();
     private static long lastNano = 0L;
@@ -39,6 +44,9 @@ public class MusicScreen extends Screen {
     }
 
     private final List<Card> cards = new ArrayList<>();
+    private final List<Integer> pList = new ArrayList<>();
+    private final List<String> pLetters = new ArrayList<>();
+    private TextFieldWidget songField = null;
     private List<String[]> hits;
     private List<String[]> songs;
     private int px;
@@ -57,7 +65,7 @@ public class MusicScreen extends Screen {
         indicatorX = 0.0f;
     }
 
-    private static int accent() {
+    static int accent() {
         return THEMES[Math.floorMod(Config.getInt("gui.theme", 0), THEMES.length)];
     }
 
@@ -110,9 +118,10 @@ public class MusicScreen extends Screen {
     @Override
     protected void init() {
         cards.clear();
+        songField = null;
         hits = Audio.hits();
         songs = Audio.songs();
-        pw = Math.min(440, this.width - 8);
+        pw = Math.min(480, this.width - 8);
         ph = Math.min(262, this.height - 8);
         px = (this.width - pw) / 2;
         py = (this.height - ph) / 2;
@@ -130,41 +139,128 @@ public class MusicScreen extends Screen {
             });
         }
 
-        switch (tab) {
-            case 0:
+        switch (TABS[tab]) {
+            case "Hit":
                 buildHit();
                 break;
-            case 1:
+            case "Musik":
                 buildMusic();
                 break;
-            case 2:
+            case "Lagu":
+                buildLagu();
+                break;
+            case "Radar":
                 buildRadar();
                 break;
-            case 3:
+            case "Mine":
                 buildMine();
                 break;
-            case 4:
+            case "Lurus":
                 buildPick();
                 break;
-            case 5:
+            case "Ore":
                 buildOre();
                 break;
-            case 6:
+            case "Area":
                 buildArea();
                 break;
-            case 7:
+            case "Visual":
                 buildVisual();
                 break;
-            case 8:
+            case "Surv":
                 buildSurvival();
                 break;
-            case 9:
+            case "Titik":
                 buildWaypoint();
                 break;
             default:
                 buildHud();
                 break;
         }
+    }
+
+    private int tabIndex(String name) {
+        for (int i = 0; i < TABS.length; i++) {
+            if (TABS[i].equals(name)) return i;
+        }
+        return 0;
+    }
+
+    private static String firstKey(String title) {
+        if (title.isEmpty()) return "#";
+        char ch = Character.toUpperCase(title.charAt(0));
+        return Character.isLetterOrDigit(ch) ? String.valueOf(ch) : "#";
+    }
+
+    private void pBuildLetters() {
+        pLetters.clear();
+        pLetters.add("");
+        List<String> keys = new ArrayList<>();
+        for (String[] s : songs) {
+            String k = firstKey(s[0]);
+            if (!keys.contains(k)) keys.add(k);
+        }
+        java.util.Collections.sort(keys);
+        pLetters.addAll(keys);
+        if (!pLetters.contains(pLetter)) pLetter = "";
+    }
+
+    private int pPages() {
+        return Math.max(1, (pList.size() + PROWS - 1) / PROWS);
+    }
+
+    private void pRefilter() {
+        pList.clear();
+        String q = pQuery.trim().toLowerCase();
+        for (int i = 0; i < songs.size(); i++) {
+            String title = songs.get(i)[0];
+            if (!q.isEmpty() && !title.toLowerCase().contains(q)) continue;
+            if (!pLetter.isEmpty() && !firstKey(title).equals(pLetter)) continue;
+            pList.add(i);
+        }
+        pPage = Math.max(0, Math.min(pPage, pPages() - 1));
+    }
+
+    private void pPick(int row) {
+        int idx = pPage * PROWS + row;
+        if (idx >= pList.size()) return;
+        Config.songIndex = pList.get(idx);
+        Config.save();
+        Audio.playSong();
+    }
+
+    private void buildLagu() {
+        pBuildLetters();
+        songField = new TextFieldWidget(this.textRenderer, px + 8, py + 54, pw - 16 - 86, 18, Text.literal("Cari"));
+        songField.setMaxLength(40);
+        songField.setText(pQuery);
+        songField.setChangedListener(s -> {
+            pQuery = s;
+            pPage = 0;
+            pRefilter();
+        });
+        addSelectableChild(songField);
+        invisible(px + pw - 8 - 80, py + 54, 80, 18, () -> {
+            int i = pLetters.indexOf(pLetter);
+            pLetter = pLetters.get((i + 1) % pLetters.size());
+            pPage = 0;
+            pRefilter();
+        });
+        for (int i = 0; i < PROWS; i++) {
+            final int row = i;
+            invisible(px + 8, py + 78 + i * 23, pw - 16, 21, () -> pPick(row));
+        }
+        int ny = py + 78 + PROWS * 23 + 2;
+        invisible(px + 8, ny, 44, 18, () -> pPage = Math.max(0, pPage - 1));
+        invisible(px + 56, ny, 44, 18, () -> pPage = Math.min(pPages() - 1, pPage + 1));
+        invisible(px + pw - 8 - 70, ny, 70, 18, () -> {
+            if (!songs.isEmpty()) {
+                Config.songIndex = (int) (Math.random() * songs.size());
+                Config.save();
+                Audio.playSong();
+            }
+        });
+        pRefilter();
     }
 
     private void stopPick() {
@@ -204,6 +300,11 @@ public class MusicScreen extends Screen {
     }
 
     private void buildMusic() {
+        cardAction("Daftar Lagu", "Buka", () -> {
+            tab = tabIndex("Lagu");
+            tabAt = System.nanoTime();
+            clearAndInit();
+        });
         cardCycle("Lagu", songs.get(Math.floorMod(Config.songIndex, songs.size()))[0],
                 () -> Config.songIndex = Math.floorMod(Config.songIndex + 1, songs.size()));
         cardAction("Lagu Sebelumnya", "<<", () -> {
@@ -211,10 +312,17 @@ public class MusicScreen extends Screen {
             Config.save();
             clearAndInit();
         });
+        cardAction("Lagu Berikutnya", ">>", () -> {
+            Config.songIndex = Math.floorMod(Config.songIndex + 1, songs.size());
+            Config.save();
+            clearAndInit();
+        });
         cardToggle("Musik", Audio.isPlaying(), () -> {
             if (Audio.isPlaying()) Audio.stopSong();
             else Audio.playSong();
         });
+        cardCycle("Setelah Selesai", Audio.END_MODES[Audio.endMode()],
+                () -> Config.setInt("music.mode", (Audio.endMode() + 1) % Audio.END_MODES.length));
         cardCycle("Volume Lagu", Config.songVol + "%", () -> Config.songVol = Config.nextVol(Config.songVol));
     }
 
@@ -402,6 +510,15 @@ public class MusicScreen extends Screen {
         clearAndInit();
     }
 
+    private String trimTo(String s, int maxW) {
+        if (this.textRenderer.getWidth(s) <= maxW) return s;
+        String t = s;
+        while (t.length() > 1 && this.textRenderer.getWidth(t + "...") > maxW) {
+            t = t.substring(0, t.length() - 1);
+        }
+        return t + "...";
+    }
+
     private static float clamp01(float v) {
         return Math.max(0.0f, Math.min(1.0f, v));
     }
@@ -427,29 +544,30 @@ public class MusicScreen extends Screen {
     }
 
     private String infoText() {
-        switch (tab) {
-            case 0:
+        switch (TABS[tab]) {
+            case "Hit":
                 return "Suara bawaan atau custom (hit.ogg di repo)";
-            case 1:
-                return "Status: " + (Audio.isPlaying() ? "memutar" : "berhenti");
-            case 2:
-                return Finder.spawnerCount + " spawner, " + Finder.chestCount + " chest terdeteksi";
-            case 3:
-                return Config.getInt("mine.mode", 0) == 1 ? "3x3: terowongan searah pandangan, berhenti di batas Area"
-                        : "Pegang pickaxe. Area diatur di tab Area.";
-            case 4:
-                return Config.getInt("pick.mode", 0) == 1 ? "Auto: gali lurus 1 blok, jalan maju sendiri, kamera halus"
-                        : "Manual: tahan serang di blok yang lu tatap, kamera tetap kontrol lu";
-            case 5:
-                return "Cari " + AutoMine.ORES[AutoMine.oreMode()] + (AutoMine.oreHidden() ? " (tembus batu)" : " (yang terlihat)")
-                        + ". Area di tab Area.";
-            case 6:
+            case "Musik":
+                return songs.size() + " lagu";
+            case "Lagu":
+                return pList.size() + " dari " + songs.size() + " lagu. Ketuk buat memutar";
+            case "Radar":
+                return Finder.spawnerCount + " spawner, " + Finder.chestCount + " chest";
+            case "Mine":
+                return Config.getInt("mine.mode", 0) == 1 ? "3x3: terowongan, berhenti di batas Area"
+                        : "Pegang pickaxe. Area di tab Area";
+            case "Lurus":
+                return Config.getInt("pick.mode", 0) == 1 ? "Auto: gali lurus, maju sendiri"
+                        : "Manual: tahan serang di blok yang lu tatap";
+            case "Ore":
+                return "Cari " + AutoMine.ORES[AutoMine.oreMode()] + (AutoMine.oreHidden() ? " (tembus batu)" : " (terlihat)");
+            case "Area":
                 return "P1: " + fmt(Config.pos1) + "  P2: " + fmt(Config.pos2) + "  (" + AutoMine.volume() + " blok)";
-            case 7:
-                return "Freecam: W A S D, Spasi naik, Shift turun, Ctrl cepat";
-            case 8:
-                return "Kapak di tangan kanan, sapling di tangan kiri";
-            case 9: {
+            case "Visual":
+                return "Freecam: WASD, Spasi naik, Shift turun, Ctrl cepat";
+            case "Surv":
+                return "Kapak kanan, sapling kiri";
+            case "Titik": {
                 Waypoints.WP w = Waypoints.current();
                 if (w == null) return "Belum ada titik";
                 return w.name + ": " + w.x + " " + w.y + " " + w.z + "  (" + (Waypoints.selected + 1) + "/" + Waypoints.list.size() + ")";
@@ -457,6 +575,60 @@ public class MusicScreen extends Screen {
             default:
                 return "Base: " + fmt(Config.base);
         }
+    }
+
+    private void chip(DrawContext ctx, int x, int y, int w, int h, String text, boolean hover, int acc, int alpha) {
+        ctx.fill(x, y, x + w, y + h, c(alpha, hover ? 0x2F3A55 : 0x252B3A));
+        int tw = this.textRenderer.getWidth(text);
+        ctx.drawTextWithShadow(this.textRenderer, Text.literal(text), x + (w - tw) / 2, y + (h - 8) / 2, 0xFF000000 | lerpRgb(acc, 0xFFFFFF, 0.5f));
+    }
+
+    private void renderLagu(DrawContext ctx, int mouseX, int mouseY, float dt, int a, int oy, float ct, int acc) {
+        if (oy == 0) songField.render(ctx, mouseX, mouseY, 0.0f);
+        if (songField.getText().isEmpty() && oy == 0) {
+            ctx.drawTextWithShadow(this.textRenderer, Text.literal("ketik judul..."), px + 14, py + 59, 0xFF666E80);
+        }
+        boolean hvL = mouseX >= px + pw - 88 && mouseX <= px + pw - 8 && mouseY >= py + 54 && mouseY <= py + 72;
+        chip(ctx, px + pw - 8 - 80, py + 54 + oy, 80, 18, "Huruf: " + (pLetter.isEmpty() ? "Semua" : pLetter), hvL, acc, a);
+
+        int curIdx = Math.floorMod(Config.songIndex, Math.max(1, songs.size()));
+        for (int i = 0; i < PROWS; i++) {
+            int idx = pPage * PROWS + i;
+            if (idx >= pList.size()) continue;
+            int songIdx = pList.get(idx);
+            float er = ease(ct * 1.6f - i * 0.09f);
+            if (er <= 0.01f) continue;
+            int ra = (int) (a * er);
+            int xo = (int) ((1.0f - er) * 14.0f);
+            int ry = py + 78 + i * 23;
+            boolean hv = mouseX >= px + 8 && mouseX <= px + pw - 8 && mouseY >= ry && mouseY <= ry + 21;
+            String hk = "lg:" + i;
+            float h = HOVER.containsKey(hk) ? HOVER.get(hk) : 0.0f;
+            h += ((hv ? 1.0f : 0.0f) - h) * (1.0f - (float) Math.exp(-dt * 16.0f));
+            HOVER.put(hk, h);
+            boolean playing = Audio.isPlaying() && songIdx == curIdx;
+            int bg = playing ? lerpRgb(0x181D29, acc, 0.38f) : lerpRgb(0x181D29, 0x222A3D, h);
+            int ryy = ry + oy;
+            ctx.fill(px + 8 + xo + 1, ryy + 2, px + pw - 8 + xo + 1, ryy + 23, c((int) (ra * 0.35f), 0x000000));
+            ctx.fill(px + 8 + xo, ryy, px + pw - 8 + xo, ryy + 21, c(ra, bg));
+            ctx.fill(px + 8 + xo, ryy, px + 11 + xo, ryy + 21, c(ra, lerpRgb(0x2A3350, acc, Math.max(h, playing ? 1.0f : 0.0f))));
+            if (er > 0.4f) {
+                ctx.drawTextWithShadow(this.textRenderer, Text.literal((songIdx + 1) + "."), px + 16 + xo, ryy + 7, 0xFF8FA0B8);
+                ctx.drawTextWithShadow(this.textRenderer, Text.literal(trimTo(songs.get(songIdx)[0], pw - 16 - 70)),
+                        px + 42 + xo, ryy + 7, playing ? 0xFF6BFF9A : 0xFFFFFFFF);
+                if (playing) {
+                    ctx.drawTextWithShadow(this.textRenderer, Text.literal("memutar"), px + pw - 62 + xo, ryy + 7, 0xFF6BFF9A);
+                }
+            }
+        }
+        if (pList.isEmpty()) {
+            ctx.drawTextWithShadow(this.textRenderer, Text.literal("Tidak ada lagu yang cocok"), px + 16, py + 90 + oy, 0xFF8FA0B8);
+        }
+        int ny = py + 78 + PROWS * 23 + 2;
+        chip(ctx, px + 8, ny + oy, 44, 18, "<", mouseX >= px + 8 && mouseX <= px + 52 && mouseY >= ny && mouseY <= ny + 18, acc, a);
+        chip(ctx, px + 56, ny + oy, 44, 18, ">", mouseX >= px + 56 && mouseX <= px + 100 && mouseY >= ny && mouseY <= ny + 18, acc, a);
+        chip(ctx, px + pw - 8 - 70, ny + oy, 70, 18, "Acak", mouseX >= px + pw - 78 && mouseX <= px + pw - 8 && mouseY >= ny && mouseY <= ny + 18, acc, a);
+        ctx.drawTextWithShadow(this.textRenderer, Text.literal("Hal " + (pPage + 1) + "/" + pPages()), px + 108, ny + 5 + oy, 0xFFAAB4C6);
     }
 
     @Override
@@ -479,7 +651,8 @@ public class MusicScreen extends Screen {
         context.fill(px, py2, px + pw, py2 + 26, c(a, 0x08080E));
         context.fill(px, py2 + 26, px + pw, py2 + 27, c(a, lerpRgb(0x0E0E16, acc, 0.6f)));
         context.fill(px, py2 + 27, px + pw, py2 + 49, c(a, 0x0A0A12));
-        context.fill(px, py2 + ph - 18, px + pw, py2 + ph, c(a, 0x08080E));
+        context.fill(px, py2 + ph - 22, px + pw, py2 + ph, c(a, 0x08080E));
+        context.fill(px, py2 + ph - 22, px + pw, py2 + ph - 21, c(a, lerpRgb(0x0E0E16, acc, 0.35f)));
 
         if (e > 0.3f) {
             context.drawTextWithShadow(this.textRenderer,
@@ -529,6 +702,7 @@ public class MusicScreen extends Screen {
             if (cd.type == 0) {
                 bg = lerpRgb(bg, lerpRgb(0x181D29, acc, 0.38f), tp);
             }
+            context.fill(cx + 1, cyy + 2, cx + cd.w + 1, cyy + cd.h + 2, c((int) (ca * 0.35f), 0x000000));
             context.fill(cx, cyy, cx + cd.w, cyy + cd.h, c(ca, bg));
             int barColor = lerpRgb(0x2A3350, acc, Math.max(h, tp));
             context.fill(cx, cyy, cx + 3, cyy + cd.h, c(ca, barColor));
@@ -542,10 +716,10 @@ public class MusicScreen extends Screen {
                     context.drawTextWithShadow(this.textRenderer, Text.literal(cd.on ? "ON" : "OFF"), cx + 10, cyy + 19,
                             cd.on ? 0xFF6BFF9A : 0xFF8A93A6);
                 } else if (cd.type == 1) {
-                    context.drawTextWithShadow(this.textRenderer, Text.literal(cd.value), cx + 10, cyy + 19,
+                    context.drawTextWithShadow(this.textRenderer, Text.literal(trimTo(cd.value, cd.w - 28)), cx + 10, cyy + 19,
                             0xFF000000 | lerpRgb(acc, 0xFFFFFF, 0.55f));
                 } else {
-                    context.drawTextWithShadow(this.textRenderer, Text.literal(cd.value), cx + 10, cyy + 19, 0xFFC8D2E4);
+                    context.drawTextWithShadow(this.textRenderer, Text.literal(trimTo(cd.value, cd.w - 28)), cx + 10, cyy + 19, 0xFFC8D2E4);
                 }
             }
             if (cd.type == 0) {
@@ -559,8 +733,24 @@ public class MusicScreen extends Screen {
             }
         }
 
-        if (ct > 0.5f) {
-            context.drawTextWithShadow(this.textRenderer, Text.literal(infoText()), px + 10, py2 + ph - 13, 0xFFAAB4C6);
+        if (TABS[tab].equals("Lagu") && songField != null) {
+            renderLagu(context, mouseX, mouseY, dt, a, oy, ct, acc);
+        }
+
+        if (e > 0.5f) {
+            boolean playing = Audio.isPlaying();
+            int barBase = py2 + ph - 6;
+            for (int i = 0; i < 4; i++) {
+                int bh = playing ? 2 + (int) ((Math.sin(now / 1.2e8 * (1.0 + i * 0.37) + i * 1.9) + 1.0) * 3.5) : 2;
+                context.fill(px + 10 + i * 4, barBase - bh, px + 13 + i * 4, barBase, c(a, playing ? acc : 0x3B4252));
+            }
+            int half = pw / 2;
+            String left = playing ? Audio.currentTitle : "Tidak memutar";
+            context.drawTextWithShadow(this.textRenderer, Text.literal(trimTo(left, half - 40)), px + 30, py2 + ph - 15,
+                    playing ? 0xFF6BFF9A : 0xFF8A93A6);
+            String right = trimTo(infoText(), pw - half - 20);
+            context.drawTextWithShadow(this.textRenderer, Text.literal(right),
+                    px + pw - 10 - this.textRenderer.getWidth(right), py2 + ph - 15, 0xFFAAB4C6);
         }
     }
 
