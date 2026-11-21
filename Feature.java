@@ -29,6 +29,10 @@ public interface Feature {
         return null;
     }
 
+    default double[] cameraState() {
+        return null;
+    }
+
     default int[] bounds() {
         return null;
     }

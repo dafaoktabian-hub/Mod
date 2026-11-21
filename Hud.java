@@ -34,13 +34,28 @@ public final class Hud {
     private Hud() {}
 
     private static void setup(MinecraftClient mc, ClientPlayerEntity p) {
-        Vec3d cam = Modules.cameraPos();
-        Vec3d eye = cam != null ? cam : p.getEyePos();
-        camX = eye.x;
-        camY = eye.y;
-        camZ = eye.z;
-        double yawR = Math.toRadians(p.getYaw());
-        double pitchR = Math.toRadians(p.getPitch());
+        double yawDeg;
+        double pitchDeg;
+        double mult = 1.0;
+        double[] cs = Modules.cameraState();
+        if (cs != null) {
+            camX = cs[0];
+            camY = cs[1];
+            camZ = cs[2];
+            yawDeg = cs[3];
+            pitchDeg = cs[4];
+            mult = cs[5];
+        } else {
+            Vec3d cam = Modules.cameraPos();
+            Vec3d eye = cam != null ? cam : p.getEyePos();
+            camX = eye.x;
+            camY = eye.y;
+            camZ = eye.z;
+            yawDeg = p.getYaw();
+            pitchDeg = p.getPitch();
+        }
+        double yawR = Math.toRadians(yawDeg);
+        double pitchR = Math.toRadians(pitchDeg);
         double sinYaw = Math.sin(yawR);
         double cosYaw = Math.cos(yawR);
         double sinPitch = Math.sin(pitchR);
@@ -55,29 +70,32 @@ public final class Hud {
         upZ = cosYaw * sinPitch;
         scrW = mc.getWindow().getScaledWidth();
         scrH = mc.getWindow().getScaledHeight();
-        double fov = Math.toRadians(mc.options.getFov().getValue());
-        focal = (scrH / 2.0) / Math.tan(fov / 2.0);
+        double cal = Config.getInt("esp.fovcal", 100) / 100.0;
+        double fovDeg = Math.max(5.0, Math.min(170.0, mc.options.getFov().getValue() * mult * cal));
+        focal = (scrH / 2.0) / Math.tan(Math.toRadians(fovDeg) / 2.0);
     }
 
-    private static boolean project(double wx, double wy, double wz, double[] out) {
+    private static void toCam(double wx, double wy, double wz, double[] out) {
         double dx = wx - camX;
         double dy = wy - camY;
         double dz = wz - camZ;
-        double z = dx * fwdX + dy * fwdY + dz * fwdZ;
-        if (z < 0.1) return false;
-        double x = dx * rightX + dz * rightZ;
-        double y = dx * upX + dy * upY + dz * upZ;
-        out[0] = scrW / 2.0 + x / z * focal;
-        out[1] = scrH / 2.0 - y / z * focal;
-        out[2] = z;
+        out[0] = dx * rightX + dz * rightZ;
+        out[1] = dx * upX + dy * upY + dz * upZ;
+        out[2] = dx * fwdX + dy * fwdY + dz * fwdZ;
+    }
+
+    private static boolean project(double wx, double wy, double wz, double[] out) {
+        toCam(wx, wy, wz, out);
+        if (out[2] < 0.05) return false;
+        double sx = scrW / 2.0 + out[0] / out[2] * focal;
+        double sy = scrH / 2.0 - out[1] / out[2] * focal;
+        out[0] = sx;
+        out[1] = sy;
         return true;
     }
 
-    private static void box(DrawContext ctx, int x1, int y1, int x2, int y2, int color) {
-        ctx.fill(x1, y1, x2 + 1, y1 + 1, color);
-        ctx.fill(x1, y2, x2 + 1, y2 + 1, color);
-        ctx.fill(x1, y1, x1 + 1, y2 + 1, color);
-        ctx.fill(x2, y1, x2 + 1, y2 + 1, color);
+    private static int clampI(double v) {
+        return (int) Math.max(-4000, Math.min(4000, v));
     }
 
     private static void line(DrawContext ctx, int x0, int y0, int x1, int y1, int color) {
@@ -85,7 +103,7 @@ public final class Hud {
         int dy = y1 - y0;
         int steps = Math.max(Math.abs(dx), Math.abs(dy));
         if (steps == 0) return;
-        for (int i = 0; i <= steps; i += 3) {
+        for (int i = 0; i <= steps; i += 2) {
             int x = x0 + (int) ((long) dx * i / steps);
             int y = y0 + (int) ((long) dy * i / steps);
             if (x < -2 || y < -2 || x > scrW + 2 || y > scrH + 2) continue;
@@ -93,51 +111,85 @@ public final class Hud {
         }
     }
 
+    private static void lineWorld(DrawContext ctx, double ax, double ay, double az, double bx, double by, double bz, int color) {
+        double[] a = new double[3];
+        double[] b = new double[3];
+        toCam(ax, ay, az, a);
+        toCam(bx, by, bz, b);
+        double near = 0.05;
+        if (a[2] < near && b[2] < near) return;
+        if (a[2] < near) {
+            double t = (near - a[2]) / (b[2] - a[2]);
+            a[0] += (b[0] - a[0]) * t;
+            a[1] += (b[1] - a[1]) * t;
+            a[2] = near;
+        } else if (b[2] < near) {
+            double t = (near - b[2]) / (a[2] - b[2]);
+            b[0] += (a[0] - b[0]) * t;
+            b[1] += (a[1] - b[1]) * t;
+            b[2] = near;
+        }
+        int x0 = clampI(scrW / 2.0 + a[0] / a[2] * focal);
+        int y0 = clampI(scrH / 2.0 - a[1] / a[2] * focal);
+        int x1 = clampI(scrW / 2.0 + b[0] / b[2] * focal);
+        int y1 = clampI(scrH / 2.0 - b[1] / b[2] * focal);
+        line(ctx, x0, y0, x1, y1, color);
+    }
+
+    private static void wireBox(DrawContext ctx, double x1, double y1, double z1, double x2, double y2, double z2, int color) {
+        lineWorld(ctx, x1, y1, z1, x2, y1, z1, color);
+        lineWorld(ctx, x1, y1, z2, x2, y1, z2, color);
+        lineWorld(ctx, x1, y2, z1, x2, y2, z1, color);
+        lineWorld(ctx, x1, y2, z2, x2, y2, z2, color);
+        lineWorld(ctx, x1, y1, z1, x1, y2, z1, color);
+        lineWorld(ctx, x2, y1, z1, x2, y2, z1, color);
+        lineWorld(ctx, x1, y1, z2, x1, y2, z2, color);
+        lineWorld(ctx, x2, y1, z2, x2, y2, z2, color);
+        lineWorld(ctx, x1, y1, z1, x1, y1, z2, color);
+        lineWorld(ctx, x2, y1, z1, x2, y1, z2, color);
+        lineWorld(ctx, x1, y2, z1, x1, y2, z2, color);
+        lineWorld(ctx, x2, y2, z1, x2, y2, z2, color);
+    }
+
     private static void drawEsp(DrawContext ctx, MinecraftClient mc) {
         if (Finder.results.isEmpty()) return;
         if (!Config.espBox && !Config.tracer) return;
         double[] out = new double[3];
-        int tracers = 0;
+        int n = 0;
         for (Finder.Entry e : Finder.results) {
+            n++;
             int color = e.spawner ? 0xFFFF5555 : 0xFFFFAA00;
-            double dxc = e.pos.getX() + 0.5 - camX;
-            double dyc = e.pos.getY() + 0.5 - camY;
-            double dzc = e.pos.getZ() + 0.5 - camZ;
+            double bx = e.pos.getX();
+            double by = e.pos.getY();
+            double bz = e.pos.getZ();
+            double x1 = e.spawner ? bx : bx + 0.0625;
+            double x2 = e.spawner ? bx + 1.0 : bx + 0.9375;
+            double z1 = e.spawner ? bz : bz + 0.0625;
+            double z2 = e.spawner ? bz + 1.0 : bz + 0.9375;
+            double y1 = by;
+            double y2 = e.spawner ? by + 1.0 : by + 0.875;
+            double mx = (x1 + x2) / 2.0;
+            double my = (y1 + y2) / 2.0;
+            double mz = (z1 + z2) / 2.0;
+            double dxc = mx - camX;
+            double dyc = my - camY;
+            double dzc = mz - camZ;
             long dist = Math.round(Math.sqrt(dxc * dxc + dyc * dyc + dzc * dzc));
 
-            if (Config.tracer && tracers < 8) {
-                if (project(e.pos.getX() + 0.5, e.pos.getY() + 0.5, e.pos.getZ() + 0.5, out)) {
-                    double tx = Math.max(-4000, Math.min(4000, out[0]));
-                    double ty = Math.max(-4000, Math.min(4000, out[1]));
-                    line(ctx, scrW / 2, scrH, (int) tx, (int) ty, color);
-                    tracers++;
+            if (Config.tracer && n <= 8) {
+                if (project(mx, my, mz, out)) {
+                    line(ctx, scrW / 2, scrH, clampI(out[0]), clampI(out[1]), color);
                 }
             }
-
             if (Config.espBox) {
-                double minX = 1e9;
-                double minY = 1e9;
-                double maxX = -1e9;
-                double maxY = -1e9;
-                boolean ok = true;
-                for (int i = 0; i < 8; i++) {
-                    if (!project(e.pos.getX() + (i & 1), e.pos.getY() + ((i >> 1) & 1), e.pos.getZ() + ((i >> 2) & 1), out)) {
-                        ok = false;
-                        break;
-                    }
-                    minX = Math.min(minX, out[0]);
-                    maxX = Math.max(maxX, out[0]);
-                    minY = Math.min(minY, out[1]);
-                    maxY = Math.max(maxY, out[1]);
+                if (n <= 12) {
+                    wireBox(ctx, x1, y1, z1, x2, y2, z2, color);
                 }
-                if (!ok) continue;
-                int x1 = (int) Math.max(-4000, minX);
-                int y1 = (int) Math.max(-4000, minY);
-                int x2 = Math.max((int) Math.min(4000, maxX), x1 + 4);
-                int y2 = Math.max((int) Math.min(4000, maxY), y1 + 4);
-                box(ctx, x1, y1, x2, y2, color);
-                String label = (e.spawner ? "Spawner " : "Chest ") + dist + "m";
-                ctx.drawTextWithShadow(mc.textRenderer, Text.literal(label), x1, y1 - 10, color);
+                if (project(mx, y2 + 0.15, mz, out)) {
+                    String label = (e.spawner ? "Spawner " : "Chest ") + dist + "m";
+                    int tw = mc.textRenderer.getWidth(label);
+                    ctx.drawTextWithShadow(mc.textRenderer, Text.literal(label), (int) out[0] - tw / 2, (int) out[1] - 10, color);
+                }
             }
         }
     }
@@ -146,6 +198,7 @@ public final class Hud {
         if (!Waypoints.show || Waypoints.list.isEmpty()) return;
         String dim = Waypoints.dimNow(mc);
         double[] out = new double[3];
+        double[] cam = new double[3];
         int i = 0;
         for (Waypoints.WP w : Waypoints.list) {
             i++;
@@ -155,16 +208,25 @@ public final class Hud {
             double dy = w.y + 0.5 - camY;
             double dz = w.z + 0.5 - camZ;
             long dist = Math.round(Math.sqrt(dx * dx + dy * dy + dz * dz));
-            if (!project(w.x + 0.5, w.y + 0.5, w.z + 0.5, out)) continue;
-            int sx = (int) Math.max(10, Math.min(scrW - 10, out[0]));
-            int sy = (int) Math.max(16, Math.min(scrH - 10, out[1]));
+            int sx;
+            int sy;
+            toCam(w.x + 0.5, w.y + 0.5, w.z + 0.5, cam);
+            if (cam[2] >= 0.05) {
+                project(w.x + 0.5, w.y + 0.5, w.z + 0.5, out);
+                sx = (int) Math.max(10, Math.min(scrW - 10, out[0]));
+                sy = (int) Math.max(16, Math.min(scrH - 10, out[1]));
+            } else {
+                sx = cam[0] >= 0 ? scrW - 10 : 10;
+                sy = scrH / 2;
+            }
             int color = WP_COLORS[(i - 1) % WP_COLORS.length];
             ctx.fill(sx - 4, sy - 1, sx + 5, sy + 2, color);
             ctx.fill(sx - 1, sy - 4, sx + 2, sy + 5, color);
             ctx.fill(sx - 2, sy - 2, sx + 3, sy + 3, color);
             String label = w.name + " " + dist + "m";
             int tw = mc.textRenderer.getWidth(label);
-            ctx.drawTextWithShadow(mc.textRenderer, Text.literal(label), sx - tw / 2, sy - 15, color);
+            int lx = Math.max(2, Math.min(scrW - tw - 2, sx - tw / 2));
+            ctx.drawTextWithShadow(mc.textRenderer, Text.literal(label), lx, sy - 15, color);
         }
     }
 
@@ -172,31 +234,7 @@ public final class Hud {
         int[] b = AutoMine.displayBounds();
         if (b == null) b = Modules.bounds();
         if (b == null) return;
-        double x1 = b[0];
-        double y1 = b[1];
-        double z1 = b[2];
-        double x2 = b[3] + 1.0;
-        double y2 = b[4] + 1.0;
-        double z2 = b[5] + 1.0;
-        double[] o = new double[3];
-        boolean[] ok = new boolean[8];
-        int[][] pt = new int[8][2];
-        for (int i = 0; i < 8; i++) {
-            double cx = (i & 1) == 0 ? x1 : x2;
-            double cy = ((i >> 1) & 1) == 0 ? y1 : y2;
-            double cz = ((i >> 2) & 1) == 0 ? z1 : z2;
-            ok[i] = project(cx, cy, cz, o);
-            if (ok[i]) {
-                pt[i][0] = (int) Math.max(-4000, Math.min(4000, o[0]));
-                pt[i][1] = (int) Math.max(-4000, Math.min(4000, o[1]));
-            }
-        }
-        int[][] edges = {{0, 1}, {2, 3}, {4, 5}, {6, 7}, {0, 2}, {1, 3}, {4, 6}, {5, 7}, {0, 4}, {1, 5}, {2, 6}, {3, 7}};
-        for (int[] e : edges) {
-            if (ok[e[0]] && ok[e[1]]) {
-                line(ctx, pt[e[0]][0], pt[e[0]][1], pt[e[1]][0], pt[e[1]][1], 0xFFFFDD55);
-            }
-        }
+        wireBox(ctx, b[0], b[1], b[2], b[3] + 1.0, b[4] + 1.0, b[5] + 1.0, 0xFFFFDD55);
     }
 
     public static void render(DrawContext ctx, RenderTickCounter tickCounter) {

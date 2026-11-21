@@ -10,7 +10,7 @@ import java.util.Map;
 
 public final class Modules {
     private static final Map<String, Feature> MAP = new LinkedHashMap<>();
-    private static final String[] CLASSES = {"com.hitmusic.Fullbright", "com.hitmusic.Freecam", "com.hitmusic.AutoTree", "com.hitmusic.PickMine"};
+    private static final String[] CLASSES = {"com.hitmusic.Cam", "com.hitmusic.Fullbright", "com.hitmusic.Freecam", "com.hitmusic.AutoTree", "com.hitmusic.PickMine"};
 
     private Modules() {}
 
@@ -75,6 +75,17 @@ public final class Modules {
             } catch (Throwable ignored) {
             }
         }
+    }
+
+    public static double[] cameraState() {
+        for (Feature f : new ArrayList<>(MAP.values())) {
+            try {
+                double[] s = f.cameraState();
+                if (s != null) return s;
+            } catch (Throwable ignored) {
+            }
+        }
+        return null;
     }
 
     public static int[] bounds() {

@@ -19,10 +19,17 @@ public class Freecam implements Feature {
     private double vx = 0.0;
     private double vy = 0.0;
     private double vz = 0.0;
+    private float camYaw = 0.0f;
+    private float camPitch = 0.0f;
     private float prevYaw = 0.0f;
     private float prevPitch = 0.0f;
+    private float lastPlayerYaw = 0.0f;
+    private float lastPlayerPitch = 0.0f;
+    private float startYaw = 0.0f;
+    private float startPitch = 0.0f;
+    private double lastMouseX = 0.0;
+    private double lastMouseY = 0.0;
     private double eyeH = 1.6;
-    private long lastTickNano = 0L;
 
     @Override
     public String id() {
@@ -54,18 +61,29 @@ public class Freecam implements Feature {
             vx = 0.0;
             vy = 0.0;
             vz = 0.0;
-            prevYaw = mc.player.getYaw();
-            prevPitch = mc.player.getPitch();
+            startYaw = mc.player.getYaw();
+            startPitch = mc.player.getPitch();
+            camYaw = startYaw;
+            camPitch = startPitch;
+            prevYaw = camYaw;
+            prevPitch = camPitch;
+            lastPlayerYaw = startYaw;
+            lastPlayerPitch = startPitch;
+            lastMouseX = mc.mouse.getX();
+            lastMouseY = mc.mouse.getY();
             cam = new ArmorStandEntity(mc.world, cx, cy, cz);
             eyeH = cam.getEyeY() - cam.getY();
-            cam.refreshPositionAndAngles(cx, cy - eyeH, cz, prevYaw, prevPitch);
+            cam.refreshPositionAndAngles(cx, cy - eyeH, cz, camYaw, camPitch);
             mc.setCameraEntity(cam);
-            lastTickNano = System.nanoTime();
             on = true;
         } else {
             on = false;
             cam = null;
-            if (mc.player != null) mc.setCameraEntity(mc.player);
+            if (mc.player != null) {
+                mc.setCameraEntity(mc.player);
+                mc.player.setYaw(startYaw);
+                mc.player.setPitch(startPitch);
+            }
         }
     }
 
@@ -98,16 +116,41 @@ public class Freecam implements Feature {
         if (mc.getCameraEntity() != cam) {
             mc.setCameraEntity(cam);
         }
-        float yaw = mc.player.getYaw();
-        float pitch = mc.player.getPitch();
+
+        float py = mc.player.getYaw();
+        float pp = mc.player.getPitch();
+        double mxNow = mc.mouse.getX();
+        double myNow = mc.mouse.getY();
+        if (mc.currentScreen == null) {
+            float dPy = py - lastPlayerYaw;
+            float dPp = pp - lastPlayerPitch;
+            if (Math.abs(dPy) > 0.001f || Math.abs(dPp) > 0.001f) {
+                camYaw += dPy;
+                camPitch += dPp;
+            } else {
+                double dmx = mxNow - lastMouseX;
+                double dmy = myNow - lastMouseY;
+                if (dmx != 0.0 || dmy != 0.0) {
+                    double s = mc.options.getMouseSensitivity().getValue() * 0.6 + 0.2;
+                    double f = s * s * s * 8.0;
+                    camYaw += (float) (dmx * f * 0.15);
+                    camPitch += (float) (dmy * f * 0.15);
+                }
+            }
+        }
+        camPitch = Math.max(-90.0f, Math.min(90.0f, camPitch));
+        lastPlayerYaw = py;
+        lastPlayerPitch = pp;
+        lastMouseX = mxNow;
+        lastMouseY = myNow;
 
         double wantX = 0.0;
         double wantY = 0.0;
         double wantZ = 0.0;
         if (mc.currentScreen == null) {
             long h = mc.getWindow().getHandle();
-            double yr = Math.toRadians(yaw);
-            double pr = Math.toRadians(pitch);
+            double yr = Math.toRadians(camYaw);
+            double pr = Math.toRadians(camPitch);
             double fx = -Math.sin(yr) * Math.cos(pr);
             double fy = -Math.sin(pr);
             double fz = Math.cos(yr) * Math.cos(pr);
@@ -156,20 +199,10 @@ public class Freecam implements Feature {
 
         cam.refreshPositionAndAngles(ox, oy - eyeH, oz, prevYaw, prevPitch);
         cam.setPosition(cx, cy - eyeH, cz);
-        cam.setYaw(yaw);
-        cam.setPitch(pitch);
-        prevYaw = yaw;
-        prevPitch = pitch;
-        lastTickNano = System.nanoTime();
-    }
-
-    @Override
-    public Vec3d cameraPos() {
-        if (!on) return null;
-        double a = (System.nanoTime() - lastTickNano) / 50.0e6;
-        if (a < 0.0) a = 0.0;
-        if (a > 1.0) a = 1.0;
-        return new Vec3d(ox + (cx - ox) * a, oy + (cy - oy) * a, oz + (cz - oz) * a);
+        cam.setYaw(camYaw);
+        cam.setPitch(camPitch);
+        prevYaw = camYaw;
+        prevPitch = camPitch;
     }
 
     @Override
